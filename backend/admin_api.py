@@ -529,7 +529,7 @@ def update_subscriber(email):
             sub = get_subscription(email=email)
 
             if provision:
-                plan = get_plan_by_name((sub or {}).get("plan_name", "Pro"))
+                plan = get_plan_by_name((sub or {}).get("plan_name", "Basic"))
                 region = data.get("region") or (sub or {}).get("server_region", "eu")
 
                 _deprovision_existing_devices(email)
@@ -731,7 +731,7 @@ def resend_subscriber_configs(email):
             "region": sub.get("server_region", "eu"),
             "email": email,
         }
-        plan = get_plan_by_name(sub.get("plan_name", "Pro"))
+        plan = get_plan_by_name(sub.get("plan_name", "Basic"))
 
         send_welcome_email(email, creds, plan)
         emailed_admin = _send_admin_copy_if_configured(creds, plan)

@@ -119,13 +119,7 @@ const Pricing = () => {
     };
 
     const handleCardPayment = (plan) => openEmailPrompt(plan, 'card');
-    const handleCryptoPayment = (plan) => {
-        if (plan.cryptoUrl) {
-            window.open(plan.cryptoUrl, '_blank', 'noopener,noreferrer');
-        } else {
-            openEmailPrompt(plan, 'crypto');
-        }
-    };
+    const handleCryptoPayment = (plan) => openEmailPrompt(plan, 'crypto');
 
     return (
         <section className="section pricing-page">

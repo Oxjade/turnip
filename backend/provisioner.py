@@ -38,7 +38,7 @@ PLANS = [
     {"name": "Pro",      "min_amount": 15000, "max_amount": 22999,  "duration_days": 30, "devices": 5},
     {"name": "Business", "min_amount": 23000, "max_amount": 999999, "duration_days": 30, "devices": 10},
 ]
-DEFAULT_PLAN = {"name": "Pro", "duration_days": 30, "devices": 5}
+DEFAULT_PLAN = {"name": "Basic", "duration_days": 30, "devices": 1}
 
 
 def get_plan_by_name(plan_name: str) -> dict:

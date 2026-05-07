@@ -7,7 +7,6 @@ const CookieBanner = () => {
     const [visible, setVisible] = useState(false);
 
     useEffect(() => {
-        // Small delay so it doesn't flash on first render
         const timer = setTimeout(() => {
             if (!localStorage.getItem(STORAGE_KEY)) setVisible(true);
         }, 800);
@@ -54,43 +53,53 @@ const CookieBanner = () => {
                 .cookie-banner {
                     position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
                     width: calc(100% - 40px); max-width: 860px;
-                    background: var(--bg2, #0f1629);
-                    border: 1px solid rgba(0, 200, 150, 0.25);
+                    background: var(--bg2);
+                    border: 1px solid var(--border);
                     border-radius: 16px;
                     padding: 16px 20px;
                     display: flex; align-items: center; justify-content: space-between; gap: 16px;
-                    box-shadow: 0 12px 48px rgba(0,0,0,0.45);
+                    box-shadow: 0 12px 48px rgba(0,0,0,0.55), 0 0 0 1px rgba(168,85,247,0.08);
                     z-index: 9999;
                     animation: slideUp 0.35s cubic-bezier(0.16,1,0.3,1);
+                    font-family: var(--sans);
                 }
                 @keyframes slideUp {
                     from { opacity: 0; transform: translateX(-50%) translateY(20px); }
                     to   { opacity: 1; transform: translateX(-50%) translateY(0); }
                 }
                 .cb-left { display: flex; align-items: flex-start; gap: 14px; flex: 1; min-width: 0; }
-                .cb-icon { width: 36px; height: 36px; background: rgba(0,200,150,0.1); border: 1px solid rgba(0,200,150,0.2); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #00c896; flex-shrink: 0; margin-top: 2px; }
-                .cb-text strong { display: block; font-size: 13px; font-weight: 700; color: #e2e8f0; margin-bottom: 4px; }
-                .cb-text p { font-size: 12px; color: #8892a4; line-height: 1.6; margin: 0; }
-                .cb-text p em { font-style: normal; color: #00c896; font-weight: 600; }
-                .cb-text a { color: #00c896; text-decoration: none; font-weight: 600; }
+                .cb-icon {
+                    width: 36px; height: 36px;
+                    background: var(--adim);
+                    border: 1px solid var(--border);
+                    border-radius: 10px;
+                    display: flex; align-items: center; justify-content: center;
+                    color: var(--accent); flex-shrink: 0; margin-top: 2px;
+                }
+                .cb-text strong { display: block; font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+                .cb-text p { font-size: 12px; color: var(--text2); line-height: 1.6; margin: 0; }
+                .cb-text p em { font-style: normal; color: var(--accent); font-weight: 600; }
+                .cb-text a { color: var(--accent); text-decoration: none; font-weight: 600; }
                 .cb-text a:hover { text-decoration: underline; }
 
                 .cb-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
                 .cb-accept {
                     display: flex; align-items: center; gap: 7px;
-                    background: #00c896; color: #050810;
+                    background: var(--accent); color: #050810;
                     border: none; border-radius: 9px;
                     padding: 9px 18px; font-size: 13px; font-weight: 700;
-                    cursor: pointer; white-space: nowrap; transition: opacity .2s;
+                    cursor: pointer; white-space: nowrap;
+                    font-family: var(--sans);
+                    transition: background 0.2s, transform 0.1s;
                 }
-                .cb-accept:hover { opacity: .85; }
+                .cb-accept:hover { background: var(--accent2); transform: translateY(-1px); }
                 .cb-dismiss {
-                    background: transparent; border: 1px solid rgba(255,255,255,0.1);
-                    color: #8892a4; border-radius: 8px; padding: 8px;
+                    background: transparent; border: 1px solid var(--border);
+                    color: var(--text3); border-radius: 8px; padding: 8px;
                     cursor: pointer; display: flex; align-items: center; justify-content: center;
                     transition: all .2s;
                 }
-                .cb-dismiss:hover { border-color: rgba(255,255,255,0.25); color: #e2e8f0; }
+                .cb-dismiss:hover { border-color: var(--accent); color: var(--accent); }
 
                 @media (max-width: 640px) {
                     .cookie-banner { flex-direction: column; align-items: flex-start; bottom: 12px; }

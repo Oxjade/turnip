@@ -34,9 +34,9 @@ LOCAL_HOSTS_FOR_CLIENTS = {"127.0.0.1", "localhost", "::1"}
 
 PLANS = [
     {"name": "Demo",     "min_amount": 0,     "max_amount": 0,      "duration_days": 7,  "devices": 1},
-    {"name": "Basic",    "min_amount": 1,     "max_amount": 6999,   "duration_days": 30, "devices": 1},
-    {"name": "Pro",      "min_amount": 7000,  "max_amount": 18999,  "duration_days": 30, "devices": 5},
-    {"name": "Business", "min_amount": 19000, "max_amount": 999999, "duration_days": 30, "devices": 10},
+    {"name": "Basic",    "min_amount": 1,     "max_amount": 14999,  "duration_days": 30, "devices": 1},
+    {"name": "Pro",      "min_amount": 15000, "max_amount": 22999,  "duration_days": 30, "devices": 5},
+    {"name": "Business", "min_amount": 23000, "max_amount": 999999, "duration_days": 30, "devices": 10},
 ]
 DEFAULT_PLAN = {"name": "Pro", "duration_days": 30, "devices": 5}
 

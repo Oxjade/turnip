@@ -45,33 +45,36 @@ const Pricing = () => {
     const plans = [
         {
             name: 'Basic',
-            price: '4.99',
-            amount_ngn: 7984,
+            price: '7.99',
+            amount_ngn: 12784,
             currency: '$',
             devices: 1,
             period: '1 device · 30 days',
             features: ['1 device', 'AES-256 encryption', '2 server regions', 'Zero traffic logs', 'Email support'],
-            featured: false
+            featured: false,
+            cryptoUrl: 'https://nowpayments.io/payment/?iid=5826422097'
         },
         {
             name: 'Pro',
-            price: '7.99',
-            amount_ngn: 12784,
+            price: '9.99',
+            amount_ngn: 15984,
             currency: '$',
             devices: 5,
             period: '5 devices · 30 days',
             features: ['5 devices', 'AES-256 encryption', 'All 4 server regions', 'Zero traffic logs', 'Priority support', 'Custom VPN profiles'],
-            featured: true
+            featured: true,
+            cryptoUrl: 'https://nowpayments.io/payment/?iid=5924483409'
         },
         {
             name: 'Business',
-            price: '19.99',
-            amount_ngn: 31984,
+            price: '14.99',
+            amount_ngn: 23984,
             currency: '$',
             devices: 10,
             period: 'Up to 10 devices · 30 days',
             features: ['Up to 10 devices', 'AES-256 encryption', 'All 4 server regions', 'Zero traffic logs', 'Dedicated support', 'Multi-server sync'],
-            featured: false
+            featured: false,
+            cryptoUrl: 'https://nowpayments.io/payment/?iid=6435120857'
         }
     ];
 
@@ -116,7 +119,13 @@ const Pricing = () => {
     };
 
     const handleCardPayment = (plan) => openEmailPrompt(plan, 'card');
-    const handleCryptoPayment = (plan) => openEmailPrompt(plan, 'crypto');
+    const handleCryptoPayment = (plan) => {
+        if (plan.cryptoUrl) {
+            window.open(plan.cryptoUrl, '_blank', 'noopener,noreferrer');
+        } else {
+            openEmailPrompt(plan, 'crypto');
+        }
+    };
 
     return (
         <section className="section pricing-page">

@@ -274,6 +274,12 @@ const Login = () => {
                                                     ? <><Loader2 className="spin" size={16} /> Creating account…</>
                                                     : <>Create Account <ArrowRight size={16} /></>}
                                             </button>
+                                            <p className="privacy-note">
+                                                By creating an account you agree to our{' '}
+                                                <a href="/terms">Terms of Service</a> and{' '}
+                                                <a href="/privacy">Privacy Policy</a>.
+                                                We store only your email and a secure session cookie — no tracking, no ads.
+                                            </p>
                                         </form>
                                         <div className="form-footer">
                                             Already have an account?{' '}
@@ -420,6 +426,14 @@ const Login = () => {
         .success-icon { color: var(--accent); margin: 0 auto 1rem; display: block; }
         .success-state h3 { color: var(--text); font-size: 20px; margin: 0 0 0.5rem; }
         .success-state p { color: var(--text2); font-size: 14px; margin: 0; }
+
+        /* Privacy note */
+        .privacy-note {
+          font-size: 11px; color: var(--text3); line-height: 1.6;
+          margin-top: 0.75rem; text-align: center;
+        }
+        .privacy-note a { color: var(--accent); text-decoration: none; }
+        .privacy-note a:hover { text-decoration: underline; }
 
         /* Spinner */
         .spin { animation: spin 0.8s linear infinite; }

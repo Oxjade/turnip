@@ -227,20 +227,54 @@ const Admin = () => {
 
     const handleReinstallStrongSwan = async () => {
         if (!window.confirm('⚠️ This will purge and fully reinstall StrongSwan on the primary server with uniqueids=never (multi-device support). This takes ~60s and will disconnect all VPN users. Continue?')) return;
-        setReinstallModal({ show: true, output: 'Connecting to server...\n', loading: true });
+        setReinstallModal({ show: true, output: 'Starting reinstall job on server…\n', loading: true });
+
+        // Safe JSON helper — returns null if response is not JSON (e.g. HTML 504)
+        const safeJson = async (res) => {
+            const ct = res.headers.get('content-type') || '';
+            if (!ct.includes('application/json')) return null;
+            try { return await res.json(); } catch { return null; }
+        };
+
         try {
-            const res = await apiFetch('/api/vpn/reinstall-strongswan', { method: 'POST' });
-            const data = await res.json();
-            const outputText = data.output || (res.ok ? 'Reinstall completed successfully.' : 'No output returned.');
-            setReinstallModal({ show: true, output: outputText, loading: false });
-            if (res.ok) {
-                showToast('✅ StrongSwan reinstalled with uniqueids=never');
-                setTimeout(refresh, 3000);
-            } else {
-                showToast(data.error || 'Reinstall failed', 'err');
+            // Step 1: kick off the background job (returns immediately)
+            const startRes = await apiFetch('/api/vpn/reinstall-strongswan', { method: 'POST' });
+            const startData = await safeJson(startRes);
+            if (!startRes.ok || !startData?.job_id) {
+                const msg = startData?.error || `Server returned ${startRes.status}`;
+                setReinstallModal({ show: true, output: `Failed to start reinstall: ${msg}`, loading: false });
+                showToast('Reinstall failed to start', 'err');
+                return;
             }
+
+            const jobId = startData.job_id;
+            setReinstallModal({ show: true, output: `Job started (${jobId})\nWaiting for server…\n`, loading: true });
+
+            // Step 2: poll /api/vpn/reinstall-status/:jobId every 3s
+            const poll = async () => {
+                try {
+                    const pollRes = await apiFetch(`/api/vpn/reinstall-status/${jobId}`);
+                    const pollData = await safeJson(pollRes);
+                    if (!pollData) return;   // non-JSON (gateway still booting) — retry
+
+                    setReinstallModal({ show: true, output: pollData.output || '…', loading: pollData.status === 'running' });
+
+                    if (pollData.status === 'done') {
+                        if (pollData.ok) {
+                            showToast('✅ StrongSwan reinstalled with uniqueids=never');
+                            setTimeout(refresh, 3000);
+                        } else {
+                            showToast('Reinstall completed with errors — check output', 'err');
+                        }
+                        return;   // stop polling
+                    }
+                } catch (_) { /* network blip — keep polling */ }
+                setTimeout(poll, 3000);
+            };
+            setTimeout(poll, 3000);
+
         } catch (error) {
-            setReinstallModal({ show: true, output: `Error: ${error.message}`, loading: false });
+            setReinstallModal({ show: true, output: `Network error: ${error.message}`, loading: false });
             showToast('API error during reinstall', 'err');
         }
     };

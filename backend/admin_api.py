@@ -518,16 +518,46 @@ def restart_vpn():
     return jsonify({"error": "ipsec restart returned non-zero exit code"}), 500
 
 
+_reinstall_jobs: dict = {}   # job_id → {status, output, ok}
+
 @app.route("/api/vpn/reinstall-strongswan", methods=["POST"])
 def reinstall_strongswan_route():
-    """Fully purge & reinstall StrongSwan with uniqueids=never on the primary server."""
+    """
+    Start a background StrongSwan reinstall and return a job_id immediately.
+    The operation takes ~60s; polling /api/vpn/reinstall-status/<job_id> gives
+    live output without hitting proxy timeouts.
+    """
     _require_auth()
     host = _primary_host()
-    log.warning(f"Admin requested full StrongSwan reinstall on {host}")
-    ok, output = reinstall_strongswan(host)
-    if ok:
-        return jsonify({"ok": True, "output": output[-2000:]})
-    return jsonify({"error": "Reinstall failed. Check admin-api logs.", "output": output[-2000:]}), 500
+    import uuid as _uuid
+    job_id = _uuid.uuid4().hex
+
+    _reinstall_jobs[job_id] = {"status": "running", "output": "Starting reinstall…\n", "ok": None}
+    log.warning(f"Admin requested full StrongSwan reinstall on {host} | job={job_id}")
+
+    def _run():
+        ok, output = reinstall_strongswan(host)
+        _reinstall_jobs[job_id].update({"status": "done", "output": output, "ok": ok})
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+
+    return jsonify({"job_id": job_id, "status": "running"})
+
+
+@app.route("/api/vpn/reinstall-status/<job_id>")
+def reinstall_status(job_id):
+    """Poll for reinstall job progress."""
+    _require_auth()
+    job = _reinstall_jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "Unknown job_id"}), 404
+    return jsonify({
+        "job_id":  job_id,
+        "status":  job["status"],           # running | done
+        "ok":      job["ok"],
+        "output":  (job["output"] or "")[-3000:],
+    })
 
 
 def _probe_http(url: str, timeout: float = 4.0) -> dict:

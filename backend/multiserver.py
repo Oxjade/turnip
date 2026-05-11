@@ -323,6 +323,90 @@ def remove_user_from_server(host: str, username: str) -> bool:
     return ok
 
 
+def clear_all_users_from_server(host: str) -> bool:
+    """Remove ALL EAP users from remote ipsec.secrets and reload."""
+    content = _ssh_read_file(host, SECRETS_FILE)
+    if content is None:
+        return False
+    # Keep non-EAP lines (e.g. RSA keys, includes)
+    lines = [l for l in content.splitlines(keepends=True)
+             if " : EAP " not in l]
+    ok = _ssh_write_file(host, SECRETS_FILE, "".join(lines))
+    if ok:
+        _ssh_run(host, "ipsec secrets")
+        log.info(f"All VPN users cleared from {host}")
+    return ok
+
+
+def reinstall_strongswan(host: str) -> tuple[bool, str]:
+    """
+    Completely purge & reinstall StrongSwan on the target host, then apply
+    the best-practice IKEv2/EAP configuration with uniqueids=never.
+
+    uniqueids=never means one set of VPN credentials can be used by multiple
+    devices at the same time without kicking each other off.  This lets a
+    single mobileconfig profile work across iPhone, iPad, Mac, etc.
+
+    Returns (success: bool, log_output: str).
+    """
+    REINSTALL_SCRIPT = r"""
+set -e
+export DEBIAN_FRONTEND=noninteractive
+
+echo "==> Stopping & purging StrongSwan..."
+systemctl stop strongswan-starter 2>/dev/null || true
+apt-get remove --purge -y strongswan strongswan-pki libcharon-extra-plugins \
+    libcharon-extauth-plugins libstrongswan-extra-plugins 2>&1 || true
+apt-get autoremove -y 2>&1 || true
+apt-get install -y strongswan strongswan-pki libcharon-extra-plugins \
+    libcharon-extauth-plugins libstrongswan-extra-plugins 2>&1
+
+echo "==> Writing /etc/ipsec.conf (uniqueids=never)..."
+cat > /etc/ipsec.conf << 'IPSEC_CONF'
+config setup
+    charondebug="ike 1, knl 1, cfg 0"
+    uniqueids=never
+
+conn ikev2-vpn
+    auto=add
+    compress=no
+    type=tunnel
+    keyexchange=ikev2
+    fragmentation=yes
+    forceencaps=yes
+    dpdaction=clear
+    dpddelay=300s
+    rekey=no
+    left=%any
+    leftid=@server
+    leftcert=server-cert.pem
+    leftsendcert=always
+    leftsubnet=0.0.0.0/0
+    right=%any
+    rightid=%any
+    rightauth=eap-mschapv2
+    rightsourceip=10.10.10.0/24
+    rightdns=8.8.8.8,8.8.4.4
+    rightsendcert=never
+    eap_identity=%identity
+IPSEC_CONF
+
+echo "==> Restarting StrongSwan..."
+systemctl enable strongswan-starter
+systemctl restart strongswan-starter
+sleep 2
+systemctl is-active strongswan-starter
+echo "==> Done."
+"""
+    out, err, code = _ssh_run(host, REINSTALL_SCRIPT, timeout=300)
+    combined = (out + "\n" + err).strip()
+    if code == 0:
+        log.info(f"StrongSwan reinstalled on {host} with uniqueids=never")
+    else:
+        log.error(f"StrongSwan reinstall failed on {host}: {combined}")
+    return code == 0, combined
+
+
 def sync_user_to_all_servers(username: str, password: str, servers: list[VPNServer]) -> list[str]:
     """
     Add a user to ALL active servers (useful for multi-hop / roaming).

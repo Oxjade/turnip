@@ -482,3 +482,16 @@ def get_pending_payment(iid: str) -> dict | None:
 def delete_pending_payment(iid: str) -> None:
     with get_conn() as conn:
         conn.execute("DELETE FROM pending_payments WHERE iid = ?", (iid,))
+
+
+def admin_clear_all_data() -> None:
+    """Wipe all user and subscription data from the database."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM subscriptions")
+        conn.execute("DELETE FROM subscription_devices")
+        conn.execute("DELETE FROM payments")
+        conn.execute("DELETE FROM users")
+        conn.execute("DELETE FROM otps")
+        conn.execute("DELETE FROM pending_payments")
+        # Vacuum to reclaim space
+        conn.execute("VACUUM")

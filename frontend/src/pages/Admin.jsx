@@ -195,6 +195,8 @@ const Admin = () => {
         }
     };
 
+    const [reinstallModal, setReinstallModal] = useState({ show: false, output: '', loading: false });
+
     const handleRestartVpn = async () => {
         if (!window.confirm('Restart StrongSwan? Active connections will drop briefly.')) return;
         try {
@@ -203,6 +205,43 @@ const Admin = () => {
             setTimeout(refresh, 4000);
         } catch (error) {
             showToast('Restart failed', 'err');
+        }
+    };
+
+    const handleClearAll = async () => {
+        if (!window.confirm('🚨 DANGER: This will permanently wipe ALL user accounts, subscriptions, and VPN credentials from the database and all servers. Proceed?')) return;
+        if (!window.confirm('FINAL WARNING: This action cannot be undone. Are you absolutely sure?')) return;
+        try {
+            const res = await apiFetch('/api/system/clear-all', { method: 'POST' });
+            if (res.ok) {
+                showToast('🔥 System wiped successfully');
+                refresh();
+            } else {
+                const data = await res.json();
+                showToast(data.error || 'Wipe failed', 'err');
+            }
+        } catch (error) {
+            showToast('API error during wipe', 'err');
+        }
+    };
+
+    const handleReinstallStrongSwan = async () => {
+        if (!window.confirm('⚠️ This will purge and fully reinstall StrongSwan on the primary server with uniqueids=never (multi-device support). This takes ~60s and will disconnect all VPN users. Continue?')) return;
+        setReinstallModal({ show: true, output: 'Connecting to server...\n', loading: true });
+        try {
+            const res = await apiFetch('/api/vpn/reinstall-strongswan', { method: 'POST' });
+            const data = await res.json();
+            const outputText = data.output || (res.ok ? 'Reinstall completed successfully.' : 'No output returned.');
+            setReinstallModal({ show: true, output: outputText, loading: false });
+            if (res.ok) {
+                showToast('✅ StrongSwan reinstalled with uniqueids=never');
+                setTimeout(refresh, 3000);
+            } else {
+                showToast(data.error || 'Reinstall failed', 'err');
+            }
+        } catch (error) {
+            setReinstallModal({ show: true, output: `Error: ${error.message}`, loading: false });
+            showToast('API error during reinstall', 'err');
         }
     };
 
@@ -424,10 +463,42 @@ const Admin = () => {
                     )}
                 </div>
                 <div className="nav-right">
+                    <button onClick={handleClearAll} className="btn-clear">Clear All</button>
+                    <button onClick={handleReinstallStrongSwan} className="btn-reinstall">Reinstall VPN</button>
                     <button onClick={handleRestartVpn} className="btn-restart">Restart VPN</button>
                     <button onClick={handleLogout} className="btn-signout">Sign out</button>
                 </div>
             </nav>
+
+            {/* Reinstall Output Modal */}
+            <AnimatePresence>
+                {reinstallModal.show && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="reinstall-overlay"
+                        onClick={() => { if (!reinstallModal.loading) setReinstallModal({ ...reinstallModal, show: false }); }}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.9, y: 20 }}
+                            animate={{ scale: 1, y: 0 }}
+                            exit={{ scale: 0.9, y: 20 }}
+                            className="reinstall-modal"
+                            onClick={e => e.stopPropagation()}
+                        >
+                            <div className="reinstall-header">
+                                <span>StrongSwan Reinstall {reinstallModal.loading ? '— Running...' : '— Complete'}</span>
+                                {!reinstallModal.loading && <button onClick={() => setReinstallModal({ ...reinstallModal, show: false })} className="reinstall-close">✕</button>}
+                            </div>
+                            <pre className="reinstall-output">
+                                {reinstallModal.output}
+                                {reinstallModal.loading && <span className="blink-cursor">▌</span>}
+                            </pre>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             <div className="dashboard-content">
                 {/* Capacity */}
@@ -750,6 +821,17 @@ const Admin = () => {
           background: rgba(244, 63, 94, 0.08); border: 1px solid rgba(244, 63, 94, 0.2); 
           color: var(--red); padding: 8px 16px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer;
         }
+        .btn-reinstall {
+          background: rgba(251, 191, 36, 0.08); border: 1px solid rgba(251, 191, 36, 0.25);
+          color: var(--amber); padding: 8px 16px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer;
+        }
+        .btn-reinstall:hover { background: var(--amber); color: #0a0f1e; }
+        .btn-clear {
+          background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3);
+          color: var(--red); padding: 8px 16px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer;
+          margin-right: 4px;
+        }
+        .btn-clear:hover { background: var(--red); color: white; }
         .btn-signout {
           background: var(--adim); border: 1px solid var(--border);
           color: var(--text); padding: 8px 16px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer;
@@ -894,6 +976,33 @@ const Admin = () => {
         .sub-btn.ext { background: rgba(168,85,247,0.1); border-color: rgba(168,85,247,0.3); color: var(--accent); }
         .sub-btn.act { background: rgba(74,222,128,0.08); border-color: rgba(74,222,128,0.25); color: var(--green, #4ade80); }
         .sub-btn.sus { background: rgba(251,146,60,0.08); border-color: rgba(251,146,60,0.25); color: var(--amber, #fb923c); }
+        .reinstall-overlay {
+          position: fixed; inset: 0; background: rgba(0,0,0,0.75); backdrop-filter: blur(4px);
+          display: flex; align-items: center; justify-content: center; z-index: 9999;
+        }
+        .reinstall-modal {
+          background: #0d1117; border: 1px solid #30363d; border-radius: 12px;
+          width: 90%; max-width: 780px; overflow: hidden;
+          box-shadow: 0 24px 80px rgba(0,0,0,0.7);
+        }
+        .reinstall-header {
+          display: flex; justify-content: space-between; align-items: center;
+          padding: 12px 20px; background: #161b22; border-bottom: 1px solid #30363d;
+          font-family: var(--mono); font-size: 12px; color: var(--amber);
+          font-weight: 700; letter-spacing: .05em;
+        }
+        .reinstall-close {
+          background: none; border: none; color: var(--text2); font-size: 16px; cursor: pointer; line-height: 1;
+        }
+        .reinstall-close:hover { color: var(--text); }
+        .reinstall-output {
+          padding: 20px; margin: 0; background: #0d1117; color: #7ee787;
+          font-family: var(--mono); font-size: 12px; line-height: 1.6;
+          white-space: pre-wrap; word-break: break-word;
+          max-height: 500px; overflow-y: auto;
+        }
+        @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+        .blink-cursor { animation: blink 1s step-end infinite; color: #7ee787; }
       `}</style>
         </div>
     );

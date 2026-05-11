@@ -30,6 +30,7 @@ from database import (
     ensure_user,
     admin_save_provisioned_credentials,
     clear_devices_for_email,
+    admin_clear_all_data,
 )
 from provisioner import (
     get_plan_by_name,
@@ -52,6 +53,8 @@ from multiserver import (
     MAX_PER_SERVER,
     add_user_to_server,
     remove_user_from_server,
+    clear_all_users_from_server,
+    reinstall_strongswan,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [admin_api] %(levelname)s %(message)s")
@@ -513,6 +516,18 @@ def restart_vpn():
     return jsonify({"error": "ipsec restart returned non-zero exit code"}), 500
 
 
+@app.route("/api/vpn/reinstall-strongswan", methods=["POST"])
+def reinstall_strongswan_route():
+    """Fully purge & reinstall StrongSwan with uniqueids=never on the primary server."""
+    _require_auth()
+    host = _primary_host()
+    log.warning(f"Admin requested full StrongSwan reinstall on {host}")
+    ok, output = reinstall_strongswan(host)
+    if ok:
+        return jsonify({"ok": True, "output": output[-2000:]})
+    return jsonify({"error": "Reinstall failed. Check admin-api logs.", "output": output[-2000:]}), 500
+
+
 @app.route("/api/subscribers/<path:email>", methods=["PUT"])
 def update_subscriber(email):
     _require_auth()
@@ -749,6 +764,33 @@ def resend_subscriber_configs(email):
     except Exception as exc:
         log.exception(f"Resend configs failed for {email}: {exc}")
         return jsonify({"error": "Resend configs failed on server. Check turnip-api logs."}), 500
+
+
+@app.route("/api/system/clear-all", methods=["POST"])
+def clear_all_system_data():
+    """Nuclear option: wipes all user/subscription data and resets all VPN servers."""
+    _require_auth()
+    try:
+        # 1. Clear database
+        admin_clear_all_data()
+        
+        # 2. Clear all servers
+        servers = load_servers()
+        cleared_count = 0
+        for srv in servers:
+            # We try even if inactive, just in case they were recently disabled
+            if clear_all_users_from_server(srv.host):
+                cleared_count += 1
+        
+        log.warning(f"SYSTEM WIPE: Database cleared and {cleared_count} servers reset.")
+        return jsonify({
+            "ok": True, 
+            "message": "System wipe successful", 
+            "servers_cleared": cleared_count
+        })
+    except Exception as e:
+        log.exception(f"System wipe failed: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

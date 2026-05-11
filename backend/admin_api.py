@@ -9,7 +9,8 @@ the ADMIN_TOKEN environment variable.
 Talks to VPN servers via SSH using multiserver.py helpers.
 """
 
-import os, re, time, subprocess, logging, html
+import os, re, time, subprocess, logging, html, threading
+import urllib.request, urllib.error
 from pathlib import Path
 from flask import Flask, jsonify, request, abort
 from flask_cors import CORS
@@ -64,6 +65,7 @@ app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+_ADMIN_API_START_TIME = time.time()
 db_init()
 
 
@@ -526,6 +528,115 @@ def reinstall_strongswan_route():
     if ok:
         return jsonify({"ok": True, "output": output[-2000:]})
     return jsonify({"error": "Reinstall failed. Check admin-api logs.", "output": output[-2000:]}), 500
+
+
+def _probe_http(url: str, timeout: float = 4.0) -> dict:
+    """Ping a local HTTP service. Returns {ok, status_code, response_ms}."""
+    t0 = time.time()
+    try:
+        req = urllib.request.urlopen(url, timeout=timeout)
+        ms = round((time.time() - t0) * 1000, 1)
+        return {"ok": True, "status_code": req.getcode(), "response_ms": ms}
+    except urllib.error.HTTPError as e:
+        ms = round((time.time() - t0) * 1000, 1)
+        return {"ok": True, "status_code": e.code, "response_ms": ms}   # service is up but returned non-200
+    except Exception as exc:
+        ms = round((time.time() - t0) * 1000, 1)
+        return {"ok": False, "status_code": None, "response_ms": ms, "error": str(exc)}
+
+
+def _probe_db() -> dict:
+    """Check DB connectivity by running a trivial query."""
+    t0 = time.time()
+    try:
+        from database import get_conn, DB_PATH
+        with get_conn() as conn:
+            conn.execute("SELECT 1").fetchone()
+        ms = round((time.time() - t0) * 1000, 1)
+        return {"ok": True, "response_ms": ms, "path": DB_PATH}
+    except Exception as exc:
+        ms = round((time.time() - t0) * 1000, 1)
+        return {"ok": False, "response_ms": ms, "error": str(exc)}
+
+
+def _uptime_str(seconds: float) -> str:
+    s = int(seconds)
+    d, s = divmod(s, 86400)
+    h, s = divmod(s, 3600)
+    m, s = divmod(s, 60)
+    if d:
+        return f"{d}d {h:02d}h {m:02d}m"
+    if h:
+        return f"{h}h {m:02d}m {s:02d}s"
+    return f"{m}m {s:02d}s"
+
+
+@app.route("/api/services/health")
+def services_health():
+    """
+    Probe all Turnip services concurrently and return a structured health report.
+    Includes: Admin API, Portal, Webhook, Database, StrongSwan.
+    """
+    _require_auth()
+
+    # Service probe targets
+    portal_url  = os.environ.get("PORTAL_HEALTH_URL",  "http://127.0.0.1:8767/api/health")
+    webhook_url = os.environ.get("WEBHOOK_HEALTH_URL", "http://127.0.0.1:8766/health")
+
+    results: dict = {}
+    lock = threading.Lock()
+
+    def run(name, fn, *args):
+        r = fn(*args)
+        with lock:
+            results[name] = r
+
+    threads = [
+        threading.Thread(target=run, args=("portal",  _probe_http, portal_url)),
+        threading.Thread(target=run, args=("webhook", _probe_http, webhook_url)),
+        threading.Thread(target=run, args=("database", _probe_db)),
+    ]
+    for t in threads:
+        t.daemon = True
+        t.start()
+    for t in threads:
+        t.join(timeout=6)
+
+    # StrongSwan — check via systemctl on primary server (non-blocking in main thread after HTTP probes)
+    try:
+        host = _primary_host()
+        out, _, code = _ssh_run(host, "systemctl is-active strongswan-starter 2>/dev/null || echo inactive", timeout=5)
+        ss_active = out.strip() == "active"
+        # Pull uptime from systemd
+        up_out, _, _ = _ssh_run(host, "systemctl show strongswan-starter --property=ActiveEnterTimestamp 2>/dev/null", timeout=5)
+        results["strongswan"] = {"ok": ss_active, "state": out.strip(), "started_at": up_out.replace("ActiveEnterTimestamp=", "").strip()}
+    except Exception as exc:
+        results["strongswan"] = {"ok": False, "state": "unreachable", "error": str(exc)}
+
+    # Admin API self-report
+    admin_uptime_sec = time.time() - _ADMIN_API_START_TIME
+    results["admin_api"] = {
+        "ok": True,
+        "uptime_sec": round(admin_uptime_sec),
+        "uptime_str": _uptime_str(admin_uptime_sec),
+        "response_ms": 0,   # local, instant
+    }
+
+    # Annotate with human-readable uptime for HTTP services
+    for key in ("portal", "webhook"):
+        svc = results.get(key, {})
+        svc["uptime_str"] = "—"   # not available without a process query on those services
+
+    return jsonify({
+        "timestamp": round(time.time()),
+        "services": {
+            "admin_api": results.get("admin_api", {}),
+            "portal":    results.get("portal",    {}),
+            "webhook":   results.get("webhook",   {}),
+            "database":  results.get("database",  {}),
+            "strongswan":results.get("strongswan",{}),
+        }
+    })
 
 
 @app.route("/api/subscribers/<path:email>", methods=["PUT"])

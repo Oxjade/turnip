@@ -486,6 +486,7 @@ def delete_pending_payment(iid: str) -> None:
 
 def admin_clear_all_data() -> None:
     """Wipe all user and subscription data from the database."""
+    # Step 1: DELETE rows inside the normal transactional connection
     with get_conn() as conn:
         conn.execute("DELETE FROM subscriptions")
         conn.execute("DELETE FROM subscription_devices")
@@ -493,5 +494,10 @@ def admin_clear_all_data() -> None:
         conn.execute("DELETE FROM users")
         conn.execute("DELETE FROM otps")
         conn.execute("DELETE FROM pending_payments")
-        # Vacuum to reclaim space
-        conn.execute("VACUUM")
+    # Step 2: VACUUM must run outside any transaction (uses a raw connection)
+    import sqlite3 as _sqlite3
+    raw = _sqlite3.connect(DB_PATH, isolation_level=None)
+    try:
+        raw.execute("VACUUM")
+    finally:
+        raw.close()

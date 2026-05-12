@@ -28,6 +28,7 @@ const Admin = () => {
         }
     });
     const [broadcastSending, setBroadcastSending] = useState(false);
+    const [selectedPlans, setSelectedPlans] = useState({});
     const pollTimer = useRef(null);
 
     const showToast = (text, type = 'ok') => {
@@ -279,13 +280,13 @@ const Admin = () => {
         }
     };
 
-    const handleSubAction = async (email, action, days = 30) => {
+    const handleSubAction = async (email, action, days = 30, planName = null) => {
         const labels = { extend: `Extend ${days}d`, activate: 'Activate', suspend: 'Suspend', expire: 'Expire' };
-        if (!window.confirm(`${labels[action] || action} for ${email}?`)) return;
+        if (!window.confirm(`${labels[action] || action} for ${email}${planName ? ` with ${planName} plan` : ''}?`)) return;
         try {
             const res = await apiFetch(`/api/subscribers/${encodeURIComponent(email)}`, {
                 method: 'PUT',
-                body: JSON.stringify({ action, days }),
+                body: JSON.stringify({ action, days, plan_name: planName }),
             });
             const data = await res.json();
             if (res.ok) {
@@ -663,7 +664,20 @@ const Admin = () => {
                                             <td>
                                                 <div className="sub-actions">
                                                     <button className="sub-btn ext" onClick={() => handleSubAction(s.email, 'extend', 30)} title="Extend 30 days">+30d</button>
-                                                    {s.sub_status !== 'active' && <button className="sub-btn act" onClick={() => handleSubAction(s.email, 'activate')} title="Activate">Activate</button>}
+                                                     {s.sub_status !== 'active' && (
+                                                         <>
+                                                             <select 
+                                                                 className="plan-select"
+                                                                 value={selectedPlans[s.email] || s.plan_name || 'Basic'}
+                                                                 onChange={(e) => setSelectedPlans({...selectedPlans, [s.email]: e.target.value})}
+                                                             >
+                                                                 <option value="Basic">Basic</option>
+                                                                 <option value="Pro">Pro (Single Log)</option>
+                                                                 <option value="Business">Business</option>
+                                                             </select>
+                                                             <button className="sub-btn act" onClick={() => handleSubAction(s.email, 'activate', 30, selectedPlans[s.email] || s.plan_name || 'Basic')} title="Activate">Activate</button>
+                                                         </>
+                                                     )}
                                                     {s.sub_status === 'active' && <button className="sub-btn sus" onClick={() => handleSubAction(s.email, 'suspend')} title="Suspend">Suspend</button>}
                                                 </div>
                                             </td>
@@ -1037,6 +1051,11 @@ const Admin = () => {
         }
         @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
         .blink-cursor { animation: blink 1s step-end infinite; color: #7ee787; }
+        .sub-actions .plan-select {
+          background: var(--bg3); border: 1px solid var(--border); border-radius: 4px;
+          color: var(--text2); font-family: var(--mono); font-size: 10px; padding: 2px 4px; outline: none;
+        }
+        .sub-actions .plan-select:focus { border-color: var(--accent); color: var(--text); }
       `}</style>
         </div>
     );

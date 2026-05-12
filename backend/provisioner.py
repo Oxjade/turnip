@@ -35,7 +35,7 @@ LOCAL_HOSTS_FOR_CLIENTS = {"127.0.0.1", "localhost", "::1"}
 PLANS = [
     {"name": "Demo",     "min_amount": 0,     "max_amount": 0,      "duration_days": 30, "devices": 1},
     {"name": "Basic",    "min_amount": 1,     "max_amount": 14999,  "duration_days": 30, "devices": 1},
-    {"name": "Pro",      "min_amount": 15000, "max_amount": 22999,  "duration_days": 30, "devices": 5},
+    {"name": "Pro",      "min_amount": 15000, "max_amount": 22999,  "duration_days": 30, "devices": 5, "single_log": True},
     {"name": "Business", "min_amount": 23000, "max_amount": 999999, "duration_days": 30, "devices": 10},
 ]
 DEFAULT_PLAN = {"name": "Basic", "duration_days": 30, "devices": 1}
@@ -169,20 +169,35 @@ def provision_user(email: str, plan: dict, region: str = "eu") -> dict:
 
     n_devices = min(plan.get("devices", 1), 10)  # cap Business at 10
     expiry    = datetime.utcnow() + timedelta(days=plan["duration_days"])
+    single_log = plan.get("single_log", False)
 
     devices = []
-    for i in range(n_devices):
+    if single_log:
         username = email_to_username(email)
         password = generate_password()
         _add_ipsec_user(username, password)
         profile_b64 = generate_mobileconfig(username, password, server_host)
-        devices.append({
-            "device_number": i + 1,
-            "username":      username,
-            "password":      password,
-            "server":        server_host,
-            "mobileconfig_b64": profile_b64,
-        })
+        for i in range(n_devices):
+            devices.append({
+                "device_number": i + 1,
+                "username":      username,
+                "password":      password,
+                "server":        server_host,
+                "mobileconfig_b64": profile_b64,
+            })
+    else:
+        for i in range(n_devices):
+            username = email_to_username(email)
+            password = generate_password()
+            _add_ipsec_user(username, password)
+            profile_b64 = generate_mobileconfig(username, password, server_host)
+            devices.append({
+                "device_number": i + 1,
+                "username":      username,
+                "password":      password,
+                "server":        server_host,
+                "mobileconfig_b64": profile_b64,
+            })
 
     # Single secrets reload after all users are written
     if not _reload_ipsec_secrets():

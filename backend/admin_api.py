@@ -682,10 +682,12 @@ def update_subscriber(email):
         elif action == "activate":
             provision = bool(data.get("provision", True))
             send_email = bool(data.get("send_email", True))
+            requested_plan = data.get("plan_name")
             sub = get_subscription(email=email)
 
             if provision:
-                plan = get_plan_by_name((sub or {}).get("plan_name", "Basic"))
+                p_name = requested_plan or (sub or {}).get("plan_name", "Basic")
+                plan = get_plan_by_name(p_name)
                 region = data.get("region") or (sub or {}).get("server_region", "eu")
 
                 _deprovision_existing_devices(email)

@@ -20,13 +20,13 @@ echo ""
 
 # ── Install Python deps ───────────────────────────────────────────────────────
 info "Installing Python dependencies..."
-pip3 install flask gunicorn python-dotenv psutil sendgrid requests siwe eth-account paramiko --break-system-packages --ignore-installed -q
+pip3 install flask flask-cors gunicorn python-dotenv psutil sendgrid requests siwe eth-account paramiko --break-system-packages --ignore-installed -q
 success "Dependencies installed"
 
 # ── Deploy to /opt/turnip ─────────────────────────────────────────────
 info "Deploying payment backend..."
 mkdir -p /opt/turnip
-cp webhook.py provisioner.py emailer.py database.py cron_expire.py crypto_payments.py multiserver.py servers.json /opt/turnip/
+cp admin_api.py webhook.py provisioner.py emailer.py database.py cron_expire.py crypto_payments.py multiserver.py servers.json /opt/turnip/
 cp .env /opt/turnip/.env
 chmod 600 /opt/turnip/.env
 success "Files deployed to /opt/turnip/"
@@ -56,8 +56,10 @@ EOF
 systemctl daemon-reload
 systemctl enable turnip-payments
 systemctl restart turnip-payments
+systemctl restart turnip-api
 sleep 2
 systemctl is-active --quiet turnip-payments && success "Payment service running on :8766" || error "Service failed — check: journalctl -u turnip-payments -n 30"
+systemctl is-active --quiet turnip-api && success "Admin API service running on :8765" || error "Admin API failed — check: journalctl -u turnip-api -n 30"
 
 # ── Open firewall port (local only — don't expose to internet) ────────────────
 # Port 8766 receives webhooks from Lemon Squeezy and NOWPayments.

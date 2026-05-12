@@ -78,14 +78,17 @@ cd /opt/turnip && python3 -c "from database import db_init; db_init()"
 success "Database ready at $(grep DB_PATH .env | cut -d= -f2)"
 
 # ── Done ──────────────────────────────────────────────────────────────────────
+DOMAIN=$(grep "^SITE_URL=" /opt/turnip/.env | cut -d/ -f3 | cut -d: -f1 || echo "YOUR_DOMAIN")
+[[ -z "$DOMAIN" ]] && DOMAIN=$(grep "^VPN_SERVER_ADDR=" /opt/turnip/.env | cut -d= -f2 || echo "YOUR_DOMAIN")
+
 echo ""
 echo -e "${BOLD}${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
 echo -e "${BOLD}${GREEN}║            PAYMENT BACKEND SETUP COMPLETE ✓              ║${NC}"
 echo -e "${BOLD}${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "${BOLD}Webhook URLs (register in dashboards):${NC}"
-echo -e "  Lemon Squeezy : ${CYAN}https://YOUR_DOMAIN/webhook/lemonsqueezy${NC}"
-echo -e "  NOWPayments   : ${CYAN}https://YOUR_DOMAIN/webhook/nowpayments${NC}"
+echo -e "  Lemon Squeezy : ${CYAN}https://${DOMAIN}/webhook/lemonsqueezy${NC}"
+echo -e "  NOWPayments   : ${CYAN}https://${DOMAIN}/webhook/nowpayments${NC}"
 echo ""
 echo -e "${BOLD}Next — set up nginx reverse proxy:${NC}"
 echo -e "  apt install nginx certbot python3-certbot-nginx"

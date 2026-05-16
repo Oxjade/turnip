@@ -119,7 +119,7 @@ cat > "${IPSEC_CONF}" << EOF
 
 config setup
     charondebug="ike 1, knl 1, cfg 0"
-    uniqueids=yes
+    uniqueids=no
 
 conn %default
     ikelifetime=60m

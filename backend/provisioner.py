@@ -177,6 +177,7 @@ def provision_user(email: str, plan: dict, region: str = "eu") -> dict:
         password = generate_password()
         _add_ipsec_user(username, password)
         profile_b64 = generate_mobileconfig(username, password, server_host)
+        sswan_b64   = generate_sswan_config(username, password, server_host)
         for i in range(n_devices):
             devices.append({
                 "device_number": i + 1,
@@ -184,6 +185,7 @@ def provision_user(email: str, plan: dict, region: str = "eu") -> dict:
                 "password":      password,
                 "server":        server_host,
                 "mobileconfig_b64": profile_b64,
+                "sswan_b64":        sswan_b64,
             })
     else:
         for i in range(n_devices):
@@ -191,12 +193,14 @@ def provision_user(email: str, plan: dict, region: str = "eu") -> dict:
             password = generate_password()
             _add_ipsec_user(username, password)
             profile_b64 = generate_mobileconfig(username, password, server_host)
+            sswan_b64   = generate_sswan_config(username, password, server_host)
             devices.append({
                 "device_number": i + 1,
                 "username":      username,
                 "password":      password,
                 "server":        server_host,
                 "mobileconfig_b64": profile_b64,
+                "sswan_b64":        sswan_b64,
             })
 
     # Single secrets reload after all users are written
@@ -221,6 +225,7 @@ def provision_user(email: str, plan: dict, region: str = "eu") -> dict:
         "expiry":           expiry.isoformat(),
         "expiry_display":   expiry.strftime("%B %d, %Y"),
         "mobileconfig_b64": devices[0]["mobileconfig_b64"],
+        "sswan_b64":        devices[0]["sswan_b64"],
         "email":            email,
         # Full device list
         "devices":          devices,
@@ -412,4 +417,44 @@ def generate_mobileconfig(username: str, password: str, server: str) -> str:
 </dict>
 </plist>"""
 
+
     return base64.b64encode(profile_xml.encode("utf-8")).decode()
+
+
+def generate_sswan_config(username: str, password: str, server: str) -> str:
+    """
+    Generate a strongSwan Android (.sswan) profile.
+    Returns base64-encoded JSON bytes for email attachment.
+    """
+    try:
+        ca_bytes = Path(CA_CERT_PATH).read_bytes()
+        ca_b64   = base64.b64encode(ca_bytes).decode()
+    except FileNotFoundError:
+        raise RuntimeError(f"CA certificate not found at {CA_CERT_PATH}")
+
+    profile_uuid = str(uuid.uuid4())
+    
+    # .sswan is a JSON-based format for the strongSwan Android app
+    profile_data = {
+        "uuid": profile_uuid,
+        "name": f"Turnip VPN - {username}",
+        "type": "ikev2-eap",
+        "remote": {
+            "addr": server,
+            "id": server
+        },
+        "local": {
+            "eap_id": username
+        },
+        "password": password,
+        "ca": {
+            "cert": ca_b64
+        },
+        "options": {
+            "encap": "auto",
+            "pfs": "yes"
+        }
+    }
+
+    profile_json = json.dumps(profile_data, indent=2)
+    return base64.b64encode(profile_json.encode("utf-8")).decode()

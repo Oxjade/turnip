@@ -50,7 +50,7 @@ log = logging.getLogger(__name__)
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../backend"))
 from database import db_init, get_subscription, get_all_subscriptions, record_payment, get_devices_for_email, register_user, get_user, admin_update_subscription, store_otp, verify_and_consume_otp, ensure_user, store_pending_payment, get_pending_payment, delete_pending_payment
-from provisioner import provision_user, deprovision_user, generate_password, generate_mobileconfig, get_plan_for_amount, get_server_host, PLANS, CA_CERT_PATH, SERVERS
+from provisioner import provision_user, deprovision_user, generate_password, generate_mobileconfig, generate_sswan_config, get_plan_for_amount, get_server_host, PLANS, CA_CERT_PATH, SERVERS
 from emailer import send_registration_notification, send_user_welcome_email, send_otp_email, send_welcome_email
 
 app = Flask(__name__, 
@@ -305,6 +305,37 @@ def download_profile():
     response.headers["Content-Type"]        = "application/x-apple-aspen-config"
     response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
     log.info(f"Device {device_num} profile download: {sub['email']}")
+    return response
+
+
+@app.route("/download/sswan")
+@login_required
+def download_sswan():
+    sub = get_current_user()
+    if not sub or sub.get("status") not in ("active", "non_renewing"):
+        return redirect(url_for("dashboard"))
+
+    device_num = int(request.args.get("device", 1))
+    devices    = get_devices_for_email(sub["email"])
+
+    if devices:
+        dev = next((d for d in devices if d["device_number"] == device_num), devices[0])
+        username    = dev["username"]
+        password    = dev["password"]
+        server_host = get_server_host(dev["server_region"])
+    else:
+        username    = sub["username"]
+        password    = sub["password"]
+        server_host = VPN_SERVER_ADDR
+
+    profile_b64  = generate_sswan_config(username, password, server_host)
+    profile_bytes = base64.b64decode(profile_b64)
+    filename      = f"turnip-device{device_num}-{username}.sswan"
+
+    response = make_response(profile_bytes)
+    response.headers["Content-Type"]        = "application/vnd.strongswan.profile"
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    log.info(f"Device {device_num} Android profile download: {sub['email']}")
     return response
 
 

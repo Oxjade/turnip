@@ -34,14 +34,21 @@ const articles = [
         tag: 'Setup',
         content: (
             <>
-                <p>Android has a built-in IKEv2 VPN client. No apps to install — everything is configured directly in your phone settings using the credentials from your email.</p>
-                <h4>Steps</h4>
+                <p>For the best experience on Android, we recommend using the <strong>strongSwan VPN Client</strong> app, which allows you to import your configuration in one tap. Alternatively, you can use the built-in Android VPN settings.</p>
+                <h4>Step 1: strongSwan App (Recommended)</h4>
                 <ol>
-                    <li>Open <strong>Settings → Network &amp; Internet → VPN</strong> (on Samsung: <strong>Settings → Connections → More connection settings → VPN</strong>).</li>
+                    <li>Install the <strong>strongSwan VPN Client</strong> from the Google Play Store.</li>
+                    <li>Download your <code>.sswan</code> profile from the <a href="/dashboard">Dashboard</a> (or open it from your credentials email).</li>
+                    <li>Tap the file to open it with strongSwan → tap <strong>Import</strong>.</li>
+                    <li>Tap the <em>"Turnip VPN"</em> profile in the app to connect.</li>
+                </ol>
+                <h4>Step 2: Manual Setup (Built-in Client)</h4>
+                <ol>
+                    <li>Open <strong>Settings → Network &amp; Internet → VPN</strong> (or search "VPN" in settings).</li>
                     <li>Tap the <strong>＋</strong> or <strong>Add VPN</strong> button.</li>
                     <li>Fill in:
                         <ul>
-                            <li><strong>Name</strong>: Turnip VPN (or any label)</li>
+                            <li><strong>Name</strong>: Turnip VPN</li>
                             <li><strong>Type</strong>: IKEv2/IPSec MSCHAPv2</li>
                             <li><strong>Server address</strong>: from your credentials email</li>
                             <li><strong>IPSec identifier</strong>: same as server address</li>
@@ -49,7 +56,6 @@ const articles = [
                         </ul>
                     </li>
                     <li>Tap <strong>Save</strong>, then tap the VPN name to connect.</li>
-                    <li>Accept the connection request when prompted.</li>
                 </ol>
                 <h4>Install the CA certificate (if the connection is rejected)</h4>
                 <ol>

@@ -39,6 +39,7 @@ from provisioner import (
     provision_user_with_device_count,
     deprovision_user,
     generate_mobileconfig,
+    generate_sswan_config,
     get_server_host,
 )
 from emailer import send_welcome_email, send_transactional_email
@@ -872,12 +873,14 @@ def resend_subscriber_configs(email):
         for dev in devices:
             server_host = get_server_host(dev.get("server_region", sub.get("server_region", "eu")))
             profile_b64 = generate_mobileconfig(dev["username"], dev["password"], server_host)
+            sswan_b64   = generate_sswan_config(dev["username"], dev["password"], server_host)
             enriched_devices.append({
                 "device_number": dev["device_number"],
                 "username": dev["username"],
                 "password": dev["password"],
                 "server": server_host,
                 "mobileconfig_b64": profile_b64,
+                "sswan_b64": sswan_b64,
             })
 
         creds = {
@@ -885,6 +888,7 @@ def resend_subscriber_configs(email):
             "password": enriched_devices[0]["password"],
             "server": enriched_devices[0]["server"],
             "mobileconfig_b64": enriched_devices[0]["mobileconfig_b64"],
+            "sswan_b64":        enriched_devices[0]["sswan_b64"],
             "devices": enriched_devices,
             "region": sub.get("server_region", "eu"),
             "email": email,

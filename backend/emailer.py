@@ -59,21 +59,28 @@ def send_welcome_email(to_email: str, creds: dict, plan: dict):
     html    = _build_html(creds, plan)
     text    = _build_text(creds, plan)
 
-    # Build one attachment per device
-    devices = creds.get("devices") or [{"device_number": 1, "username": creds["username"], "mobileconfig_b64": creds["mobileconfig_b64"]}]
-    attachments = [
-        (base64.b64decode(d["mobileconfig_b64"]), f"turnip-device{d['device_number']}-{d['username']}.mobileconfig")
-        for d in devices
-        if d.get("mobileconfig_b64")
-    ]
+    attachments = []
+    for d in devices:
+        if d.get("mobileconfig_b64"):
+            attachments.append((
+                base64.b64decode(d["mobileconfig_b64"]), 
+                f"turnip-device{d['device_number']}-{d['username']}.mobileconfig",
+                "application/x-apple-aspen-config"
+            ))
+        if d.get("sswan_b64"):
+            attachments.append((
+                base64.b64decode(d["sswan_b64"]), 
+                f"turnip-device{d['device_number']}-{d['username']}.sswan",
+                "application/vnd.strongswan.profile"
+            ))
 
-    # Primary attachment (Device 1) for single-attachment APIs; extras appended below
-    primary_bytes, primary_name = attachments[0] if attachments else (b"", "turnip.mobileconfig")
+    # Primary attachment (Device 1) for single-attachment APIs
+    primary_bytes, primary_name, primary_mime = attachments[0] if attachments else (b"", "turnip.mobileconfig", "application/x-apple-aspen-config")
 
     log.info(f"Sending welcome email via {settings['provider']} to {to_email} from {settings['from_email']}")
 
     if settings["provider"] == "sendgrid":
-        _send_sendgrid(settings, to_email, subject, html, text, primary_bytes, primary_name)
+        _send_sendgrid(settings, to_email, subject, html, text, primary_bytes, primary_name, primary_mime)
     elif settings["provider"] == "resend":
         _send_resend_multi(settings, to_email, subject, html, text, attachments)
     else:
@@ -313,8 +320,9 @@ def _send_smtp_multi(settings: dict, to: str, subject: str, html: str, text: str
     body.attach(MIMEText(html, "html"))
     msg.attach(body)
 
-    for att_bytes, att_name in attachments:
-        part = MIMEBase("application", "x-apple-aspen-config")
+    for att_bytes, att_name, att_mime in attachments:
+        main_type, sub_type = att_mime.split("/", 1)
+        part = MIMEBase(main_type, sub_type)
         part.set_payload(att_bytes)
         encoders.encode_base64(part)
         part.add_header("Content-Disposition", f'attachment; filename="{att_name}"')
@@ -339,7 +347,7 @@ def _send_smtp(settings: dict, to: str, subject: str, html: str, text: str,
 # ── SendGrid sender ───────────────────────────────────────────────────────────
 
 def _send_sendgrid(settings: dict, to: str, subject: str, html: str, text: str,
-                   attachment: bytes, filename: str):
+                   attachment: bytes, filename: str, mime_type: str = "application/x-apple-aspen-config"):
     try:
         import sendgrid
         from sendgrid.helpers.mail import (
@@ -363,7 +371,7 @@ def _send_sendgrid(settings: dict, to: str, subject: str, html: str, text: str,
     att = Attachment(
         FileContent(base64.b64encode(attachment).decode()),
         FileName(filename),
-        FileType("application/x-apple-aspen-config"),
+        FileType(mime_type),
         Disposition("attachment"),
     )
     message.attachment = att
@@ -389,7 +397,7 @@ def _send_resend_multi(settings: dict, to: str, subject: str, html: str, text: s
         "text": text,
         "attachments": [
             {"filename": att_name, "content": base64.b64encode(att_bytes).decode()}
-            for att_bytes, att_name in attachments
+            for att_bytes, att_name, att_mime in attachments
         ],
     })
 
@@ -534,11 +542,20 @@ def _build_html(creds: dict, plan: dict) -> str:
     </div>
 
     <div class="os-card">
-      <div class="os-name">Android</div>
+      <div class="os-name">Android — one tap (recommended)</div>
       <ol class="os-steps">
         <li>Install the <strong style="color:#e8f0fe">strongSwan</strong> app from Play Store</li>
-        <li>Add profile: server <span style="color:#00c896;font-family:monospace">{server}</span> · type IKEv2 EAP</li>
-        <li>Enter username and password above</li>
+        <li>Open the <strong style="color:#e8f0fe">turnip-{username}.sswan</strong> attachment</li>
+        <li>Tap "Import" → then tap the "Turnip VPN" profile to connect</li>
+      </ol>
+    </div>
+
+    <div class="os-card">
+      <div class="os-name">Android — manual setup</div>
+      <ol class="os-steps">
+        <li>Settings → VPN → Add VPN</li>
+        <li>Type: <strong style="color:#e8f0fe">IKEv2/IPsec MSCHAPv2</strong></li>
+        <li>Server: <span style="color:#00c896;font-family:monospace">{server}</span> · Username + password above</li>
       </ol>
     </div>
   </div>
@@ -578,7 +595,7 @@ SETUP
 ─────
 iOS/macOS : Open an attached .mobileconfig file and tap Install (one per device)
 Windows   : Settings → VPN → Add → IKEv2 → enter server + credentials
-Android   : Install strongSwan app → add profile with credentials above
+Android   : Install strongSwan app → open .sswan attachment OR add profile manually with credentials above
 
 Keep these credentials private.
 

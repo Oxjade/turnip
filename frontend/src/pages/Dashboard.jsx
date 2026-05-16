@@ -189,9 +189,14 @@ const Dashboard = () => {
                             <div key={dev.device_number} className="device">
                                 <div className="device-head">
                                     <span>Device {dev.device_number}</span>
-                                    <a href={`/download/profile?device=${dev.device_number}`} className="dl-btn">
-                                        <Download size={12} /> Profile
-                                    </a>
+                                    <div style={{ display: 'flex', gap: '6px' }}>
+                                        <a href={`/download/profile?device=${dev.device_number}`} className="dl-btn" title="iOS / macOS Profile">
+                                            <Download size={12} /> iOS
+                                        </a>
+                                        <a href={`/download/sswan?device=${dev.device_number}`} className="dl-btn android" title="Android strongSwan Profile">
+                                            <Download size={12} /> Android
+                                        </a>
+                                    </div>
                                 </div>
                                 {[
                                     { lbl: 'IKEv2 Username', val: dev.username, id: `u${dev.device_number}` },

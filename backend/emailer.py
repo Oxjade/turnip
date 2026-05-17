@@ -60,7 +60,7 @@ def send_welcome_email(to_email: str, creds: dict, plan: dict):
     text    = _build_text(creds, plan)
 
     attachments = []
-    for d in devices:
+    for d in creds.get("devices", []):
         if d.get("mobileconfig_b64"):
             attachments.append((
                 base64.b64decode(d["mobileconfig_b64"]), 

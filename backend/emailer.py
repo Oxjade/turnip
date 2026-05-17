@@ -341,7 +341,7 @@ def _send_smtp_multi(settings: dict, to: str, subject: str, html: str, text: str
 
 def _send_smtp(settings: dict, to: str, subject: str, html: str, text: str,
                attachment: bytes, filename: str):
-    _send_smtp_multi(settings, to, subject, html, text, [(attachment, filename)])
+    _send_smtp_multi(settings, to, subject, html, text, [(attachment, filename, "application/octet-stream")])
 
 
 # ── SendGrid sender ───────────────────────────────────────────────────────────
@@ -396,7 +396,7 @@ def _send_resend_multi(settings: dict, to: str, subject: str, html: str, text: s
         "html": html,
         "text": text,
         "attachments": [
-            {"filename": att_name, "content": base64.b64encode(att_bytes).decode()}
+            {"filename": att_name, "content": list(att_bytes), "content_type": att_mime}
             for att_bytes, att_name, att_mime in attachments
         ],
     })
@@ -404,7 +404,7 @@ def _send_resend_multi(settings: dict, to: str, subject: str, html: str, text: s
 
 def _send_resend(settings: dict, to: str, subject: str, html: str, text: str,
                  attachment: bytes, filename: str):
-    _send_resend_multi(settings, to, subject, html, text, [(attachment, filename)])
+    _send_resend_multi(settings, to, subject, html, text, [(attachment, filename, "application/octet-stream")])
 
 
 # ── Email templates ───────────────────────────────────────────────────────────

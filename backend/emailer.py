@@ -396,7 +396,7 @@ def _send_resend_multi(settings: dict, to: str, subject: str, html: str, text: s
         "html": html,
         "text": text,
         "attachments": [
-            {"filename": att_name, "content": list(att_bytes), "content_type": att_mime}
+            {"filename": att_name, "content": base64.b64encode(att_bytes).decode(), "content_type": att_mime}
             for att_bytes, att_name, att_mime in attachments
         ],
     })

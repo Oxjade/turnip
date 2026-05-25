@@ -447,26 +447,32 @@ def broadcast_email_to_subscribers():
         subject = (data.get("subject") or "").strip()
         body = (data.get("body") or "").strip()
         audience = (data.get("audience") or "all").strip().lower()
+        individual_email = (data.get("individual_email") or "").strip().lower()
         dry_run = bool(data.get("dry_run", False))
 
         if not subject:
             return jsonify({"error": "subject required"}), 400
         if not body:
             return jsonify({"error": "body required"}), 400
-        if audience not in {"all", "active", "registered"}:
-            return jsonify({"error": "audience must be one of: all, active, registered"}), 400
+        if audience not in {"all", "active", "registered", "individual"}:
+            return jsonify({"error": "audience must be one of: all, active, registered, individual"}), 400
+        if audience == "individual" and not individual_email:
+            return jsonify({"error": "individual_email required for individual audience"}), 400
 
         users = get_all_users()
         recipients = []
-        for u in users:
-            email = (u.get("email") or "").strip().lower()
-            if not email:
-                continue
-            if audience == "active" and u.get("sub_status") not in {"active", "non_renewing"}:
-                continue
-            if audience == "registered" and u.get("sub_status") in {"active", "non_renewing", "expired", "disabled"}:
-                continue
-            recipients.append(email)
+        if audience == "individual":
+            recipients.append(individual_email)
+        else:
+            for u in users:
+                email = (u.get("email") or "").strip().lower()
+                if not email:
+                    continue
+                if audience == "active" and u.get("sub_status") not in {"active", "non_renewing"}:
+                    continue
+                if audience == "registered" and u.get("sub_status") in {"active", "non_renewing", "expired", "disabled"}:
+                    continue
+                recipients.append(email)
 
         # Preserve order while deduplicating
         recipients = list(dict.fromkeys(recipients))

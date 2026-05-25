@@ -22,9 +22,10 @@ const Admin = () => {
     const [subscribers, setSubscribers] = useState([]);
     const [broadcast, setBroadcast] = useState(() => {
         try {
-            return JSON.parse(localStorage.getItem('admin_broadcast_draft') || '{"subject":"","body":"","audience":"all"}');
+            const saved = JSON.parse(localStorage.getItem('admin_broadcast_draft') || '{"subject":"","body":"","audience":"all"}');
+            return { subject: '', body: '', audience: 'all', individualEmail: '', ...saved };
         } catch {
-            return { subject: '', body: '', audience: 'all' };
+            return { subject: '', body: '', audience: 'all', individualEmail: '' };
         }
     });
     const [broadcastSending, setBroadcastSending] = useState(false);
@@ -313,6 +314,7 @@ const Admin = () => {
                     subject: broadcast.subject,
                     body: broadcast.body,
                     audience: broadcast.audience,
+                    individual_email: broadcast.individualEmail,
                     dry_run: true,
                 }),
             });
@@ -346,6 +348,7 @@ const Admin = () => {
                     subject: broadcast.subject,
                     body: broadcast.body,
                     audience: broadcast.audience,
+                    individual_email: broadcast.individualEmail,
                     dry_run: false,
                 }),
             });
@@ -679,6 +682,10 @@ const Admin = () => {
                                                          </>
                                                      )}
                                                     {s.sub_status === 'active' && <button className="sub-btn sus" onClick={() => handleSubAction(s.email, 'suspend')} title="Suspend">Suspend</button>}
+                                                    <button className="sub-btn" onClick={() => {
+                                                        setBroadcast({ ...broadcast, audience: 'individual', individualEmail: s.email });
+                                                        document.querySelector('.broadcast-grid').scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                    }} title="Send Email">Email</button>
                                                 </div>
                                             </td>
                                         </tr>
@@ -704,8 +711,20 @@ const Admin = () => {
                                 <option value="all">All users</option>
                                 <option value="active">Active subscribers</option>
                                 <option value="registered">Registered without subscription</option>
+                                <option value="individual">Individual user</option>
                             </select>
                         </div>
+                        {broadcast.audience === 'individual' && (
+                            <div className="broadcast-row">
+                                <label>User Email</label>
+                                <input
+                                    type="email"
+                                    value={broadcast.individualEmail || ''}
+                                    onChange={(e) => setBroadcast({ ...broadcast, individualEmail: e.target.value })}
+                                    placeholder="user@example.com"
+                                />
+                            </div>
+                        )}
                         <div className="broadcast-row">
                             <label>Subject</label>
                             <input

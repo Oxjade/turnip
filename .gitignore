@@ -17,6 +17,11 @@ lerna-debug.log*
 .env.*
 !.env.example
 
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
 # Editor
 .vscode/
 .idea/

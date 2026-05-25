@@ -17,6 +17,7 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 DB_PATH = os.environ.get("DB_PATH", "/opt/turnip/payments.db")
+AFFILIATE_COMMISSION_RATE = float(os.environ.get("AFFILIATE_COMMISSION_RATE", "0.20"))
 
 
 # ── Connection ─────────────────────────────────────────────────────────────────
@@ -95,11 +96,32 @@ def db_init():
             );
 
             CREATE TABLE IF NOT EXISTS pending_payments (
-                iid        TEXT PRIMARY KEY,
-                email      TEXT NOT NULL,
-                plan_code  TEXT NOT NULL,
-                region     TEXT NOT NULL DEFAULT 'eu',
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                iid           TEXT PRIMARY KEY,
+                email         TEXT NOT NULL,
+                plan_code     TEXT NOT NULL,
+                region        TEXT NOT NULL DEFAULT 'eu',
+                referral_code TEXT,
+                created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS affiliates (
+                email         TEXT PRIMARY KEY,
+                name          TEXT NOT NULL,
+                referral_code TEXT UNIQUE NOT NULL,
+                wallet_btc    TEXT,
+                wallet_eth    TEXT,
+                wallet_sol    TEXT,
+                wallet_sui    TEXT,
+                created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS referrals (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                affiliate_code TEXT NOT NULL,
+                referred_email TEXT NOT NULL,
+                plan_name      TEXT NOT NULL,
+                amount         REAL NOT NULL,
+                created_at     TEXT NOT NULL DEFAULT (datetime('now'))
             );
 
             CREATE INDEX IF NOT EXISTS idx_sub_email     ON subscriptions(email);
@@ -107,6 +129,8 @@ def db_init():
             CREATE INDEX IF NOT EXISTS idx_dev_email     ON subscription_devices(email);
             CREATE INDEX IF NOT EXISTS idx_pay_reference ON payments(reference);
             CREATE INDEX IF NOT EXISTS idx_users_email   ON users(email);
+            CREATE INDEX IF NOT EXISTS idx_affiliates_code ON affiliates(referral_code);
+            CREATE INDEX IF NOT EXISTS idx_referrals_code  ON referrals(affiliate_code);
         """)
         # Migrate existing DBs that lack server_region column
         try:
@@ -117,13 +141,19 @@ def db_init():
         try:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS pending_payments (
-                    iid        TEXT PRIMARY KEY,
-                    email      TEXT NOT NULL,
-                    plan_code  TEXT NOT NULL,
-                    region     TEXT NOT NULL DEFAULT 'eu',
-                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                    iid           TEXT PRIMARY KEY,
+                    email         TEXT NOT NULL,
+                    plan_code     TEXT NOT NULL,
+                    region        TEXT NOT NULL DEFAULT 'eu',
+                    referral_code TEXT,
+                    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
                 )
             """)
+        except Exception:
+            pass
+        # Migrate existing pending_payments to add referral_code
+        try:
+            conn.execute("ALTER TABLE pending_payments ADD COLUMN referral_code TEXT")
         except Exception:
             pass
     log.info(f"Database initialised at {DB_PATH}")
@@ -461,12 +491,12 @@ def get_all_users() -> list[dict]:
 
 # ── Pending payments (NOWPayments static-invoice flow) ─────────────────────────
 
-def store_pending_payment(iid: str, email: str, plan_code: str, region: str) -> None:
+def store_pending_payment(iid: str, email: str, plan_code: str, region: str, referral_code: str = None) -> None:
     """Record that a user is about to pay a static NOWPayments invoice."""
     with get_conn() as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO pending_payments (iid, email, plan_code, region) VALUES (?, ?, ?, ?)",
-            (iid, email.strip().lower(), plan_code.lower(), region),
+            "INSERT OR REPLACE INTO pending_payments (iid, email, plan_code, region, referral_code) VALUES (?, ?, ?, ?, ?)",
+            (iid, email.strip().lower(), plan_code.lower(), region, referral_code),
         )
 
 
@@ -501,3 +531,91 @@ def admin_clear_all_data() -> None:
         raw.execute("VACUUM")
     finally:
         raw.close()
+
+
+# ── Referral & Affiliate operations ────────────────────────────────────────────
+
+def register_affiliate(email: str, name: str, referral_code: str) -> dict:
+    with get_conn() as conn:
+        # Generate code if none provided (ensure uniqueness)
+        if not referral_code:
+            import secrets, string
+            for _ in range(10):
+                referral_code = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(6)).upper()
+                row = conn.execute("SELECT 1 FROM affiliates WHERE referral_code = ?", (referral_code,)).fetchone()
+                if not row:
+                    break
+        
+        conn.execute(
+            "INSERT INTO affiliates (email, name, referral_code) VALUES (?, ?, ?)",
+            (email.strip().lower(), name.strip(), referral_code)
+        )
+        row = conn.execute("SELECT * FROM affiliates WHERE email = ?", (email.strip().lower(),)).fetchone()
+        return dict(row)
+
+
+def get_affiliate(email: str) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM affiliates WHERE email = ?", (email.strip().lower(),)).fetchone()
+        return dict(row) if row else None
+
+
+def update_affiliate_wallets(email: str, wallets: dict) -> None:
+    with get_conn() as conn:
+        conn.execute("""
+            UPDATE affiliates
+            SET wallet_btc = ?, wallet_eth = ?, wallet_sol = ?, wallet_sui = ?
+            WHERE email = ?
+        """, (wallets.get("btc"), wallets.get("eth"), wallets.get("sol"), wallets.get("sui"), email.strip().lower()))
+
+
+def record_referral(referral_code: str, referred_email: str, plan_name: str, amount: float) -> None:
+    if not referral_code:
+        return
+    commission_amount = round(float(amount or 0) * AFFILIATE_COMMISSION_RATE, 2)
+    with get_conn() as conn:
+        # Check if the code is valid
+        aff = conn.execute("SELECT 1 FROM affiliates WHERE referral_code = ?", (referral_code,)).fetchone()
+        if not aff:
+            return
+            
+        conn.execute(
+            "INSERT INTO referrals (affiliate_code, referred_email, plan_name, amount) VALUES (?, ?, ?, ?)",
+            (referral_code, referred_email.strip().lower(), plan_name, commission_amount)
+        )
+
+
+def get_affiliate_stats(referral_code: str) -> dict:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT plan_name, amount, created_at FROM referrals WHERE affiliate_code = ? ORDER BY created_at DESC", (referral_code,)).fetchall()
+        referrals = [dict(r) for r in rows]
+        total_amount = sum(r["amount"] for r in referrals)
+        return {
+            "total_referrals": len(referrals),
+            "total_amount": total_amount,
+            "referrals": referrals
+        }
+
+
+def get_admin_affiliates() -> list[dict]:
+    """Admin: Return all affiliates joined with their referral totals."""
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT a.*, 
+                   COUNT(r.id) as referral_count,
+                   COALESCE(SUM(r.amount), 0) as total_earned
+            FROM affiliates a
+            LEFT JOIN referrals r ON a.referral_code = r.affiliate_code
+            GROUP BY a.email
+            ORDER BY total_earned DESC, referral_count DESC, a.created_at DESC
+        """).fetchall()
+        
+        affiliates = []
+        for r in rows:
+            aff = dict(r)
+            # Fetch specific referrals for this affiliate
+            ref_rows = conn.execute("SELECT referred_email, plan_name, amount, created_at FROM referrals WHERE affiliate_code = ?", (aff["referral_code"],)).fetchall()
+            aff["referrals"] = [dict(ref) for ref in ref_rows]
+            affiliates.append(aff)
+            
+        return affiliates

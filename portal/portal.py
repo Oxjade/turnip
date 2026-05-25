@@ -396,7 +396,7 @@ def regenerate_password():
     return jsonify({"ok": True, "password": new_password})
 
 
-def _ls_checkout_url(email: str, plan_code: str, region: str = "eu") -> str:
+def _ls_checkout_url(email: str, plan_code: str, region: str = "eu", referral_code: str = None) -> str:
     """Build a Lemon Squeezy checkout URL with pre-filled email and custom data."""
     from urllib.parse import urlencode
     base = LS_VARIANT_URLS.get(plan_code.lower(), "")
@@ -411,6 +411,8 @@ def _ls_checkout_url(email: str, plan_code: str, region: str = "eu") -> str:
         "checkout[custom][plan_code]": plan_code.lower(),
         "checkout[custom][region]": region,
     }
+    if referral_code:
+        params["checkout[custom][referral_code]"] = referral_code
     if redirect_url:
         params["checkout[redirect_url]"] = redirect_url
     return f"{base}?{urlencode(params)}"
@@ -423,8 +425,9 @@ def initiate_payment():
     data      = request.get_json()
     plan_code = data.get("plan_code", "pro")
     region    = data.get("region", "eu")
+    referral_code = data.get("referral_code")
     try:
-        payment_url = _ls_checkout_url(session["email"], plan_code, region)
+        payment_url = _ls_checkout_url(session["email"], plan_code, region, referral_code)
         return jsonify({"ok": True, "payment_url": payment_url})
     except ValueError as e:
         log.error(f"LS checkout URL error: {e}")
@@ -438,12 +441,13 @@ def pay_public_initiate():
     email     = data.get("email", "")
     plan_code = data.get("plan_code", "pro")
     region    = data.get("region", "eu")
+    referral_code = data.get("referral_code")
 
     if not email or "@" not in email:
         return jsonify({"error": "Valid email is required"}), 400
 
     try:
-        payment_url = _ls_checkout_url(email, plan_code, region)
+        payment_url = _ls_checkout_url(email, plan_code, region, referral_code)
         return jsonify({"ok": True, "payment_url": payment_url})
     except ValueError as e:
         log.error(f"LS checkout URL error: {e}")
@@ -466,6 +470,7 @@ def crypto_pay_initiate():
     email     = data.get("email") or session.get("email", "")
     plan_code = data.get("plan_code", "pro").lower()
     region    = data.get("region", "eu")
+    referral_code = data.get("referral_code")
 
     if not email or "@" not in email:
         return jsonify({"error": "Valid email is required"}), 400
@@ -479,8 +484,8 @@ def crypto_pay_initiate():
     from urllib.parse import urlparse, parse_qs
     iid = parse_qs(urlparse(payment_url).query).get("iid", [None])[0]
     if iid:
-        store_pending_payment(iid=iid, email=email, plan_code=plan_code, region=region)
-        log.info(f"Pending payment stored: iid={iid} email={email} plan={plan_code}")
+        store_pending_payment(iid=iid, email=email, plan_code=plan_code, region=region, referral_code=referral_code)
+        log.info(f"Pending payment stored: iid={iid} email={email} plan={plan_code} ref={referral_code}")
 
     return jsonify({"ok": True, "payment_url": payment_url})
 
@@ -635,6 +640,59 @@ def get_geo():
 @app.route("/health")
 def health():
     return jsonify({"status": "ok", "service": "Turnip Portal"}), 200
+
+
+@app.route("/api/affiliate", methods=["GET"])
+@login_required
+def get_affiliate_details():
+    from database import get_affiliate, get_affiliate_stats
+    email = session["email"]
+    
+    affiliate = get_affiliate(email)
+    if not affiliate:
+        return jsonify({"is_affiliate": False})
+        
+    stats = get_affiliate_stats(affiliate["referral_code"])
+    
+    return jsonify({
+        "is_affiliate": True,
+        "profile": affiliate,
+        "stats": stats
+    })
+
+
+@app.route("/api/affiliate", methods=["POST"])
+@login_required
+def update_affiliate():
+    from database import get_affiliate, register_affiliate, update_affiliate_wallets
+    email = session["email"]
+    data = request.get_json() or {}
+    
+    affiliate = get_affiliate(email)
+    
+    if not affiliate:
+        # Register new affiliate
+        name = data.get("name", "").strip()
+        referral_code = data.get("referral_code", "").strip()
+        
+        # Optionally allow them to pick their own code, if it's alphanumeric and < 20 chars
+        import re
+        if referral_code and not re.match(r"^[a-zA-Z0-9_-]{3,20}$", referral_code):
+            return jsonify({"error": "Invalid referral code format. Use 3-20 letters/numbers."}), 400
+            
+        try:
+            affiliate = register_affiliate(email, name or email.split("@")[0], referral_code)
+        except Exception as e:
+            if "UNIQUE" in str(e):
+                return jsonify({"error": "That referral code is already taken. Please choose another."}), 400
+            log.error(f"Affiliate registration error: {e}")
+            return jsonify({"error": "Could not register affiliate."}), 500
+            
+    # Update wallets
+    wallets = data.get("wallets", {})
+    update_affiliate_wallets(email, wallets)
+    
+    return jsonify({"ok": True, "profile": get_affiliate(email)})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

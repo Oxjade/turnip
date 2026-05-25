@@ -9,13 +9,27 @@ import Pricing from './pages/Pricing';
 import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
 import Docs from './pages/Docs';
+import Affiliate from './pages/Affiliate';
 import { Security, Terms, Privacy } from './pages/Legal';
+
+// Tracker component to extract ?ref=... and save to localStorage
+function ReferralTracker() {
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const refCode = params.get('ref');
+    if (refCode) {
+      localStorage.setItem('turnip_referral', refCode);
+    }
+  }, []);
+  return null;
+}
 
 function App() {
   return (
     <Router>
       <AuthProvider>
       <div className="app-container">
+        <ReferralTracker />
         <Navbar />
         <main>
           <Routes>
@@ -25,6 +39,7 @@ function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/admin" element={<Admin />} />
             <Route path="/docs" element={<Docs />} />
+            <Route path="/affiliate" element={<Affiliate />} />
             <Route path="/security" element={<Security />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />

@@ -53,7 +53,7 @@ def verify_lemonsqueezy_signature(payload: bytes, sig_header: str) -> bool:
 
 # ── Shared provisioning helper ────────────────────────────────────────────────
 
-def _provision_and_record(email: str, plan_code: str, reference: str, region: str = "eu"):
+def _provision_and_record(email: str, plan_code: str, reference: str, region: str = "eu", referral_code: str = None):
     """Find plan, provision VPN account(s), record payment, email credentials."""
     if payment_exists(reference):
         log.warning(f"Duplicate webhook ignored: ref={reference}")
@@ -75,6 +75,12 @@ def _provision_and_record(email: str, plan_code: str, reference: str, region: st
         region=creds["region"],
         devices=creds["devices"],
     )
+    
+    if referral_code:
+        from database import record_referral
+        record_referral(referral_code, email, plan["name"], plan["min_amount"])
+        log.info(f"Recorded referral {referral_code} for {email}")
+
     send_welcome_email(email, creds, plan)
     log.info(f"Welcome email sent to {email}")
 
@@ -89,9 +95,10 @@ def handle_order_created(data: dict, meta: dict):
     custom_data = meta.get("custom_data") or {}
     plan_code   = custom_data.get("plan_code", "pro")
     region      = custom_data.get("region", "eu")
+    referral_code = custom_data.get("referral_code")
 
     log.info(f"order_created: {email} | plan={plan_code} | region={region} | ref={reference}")
-    _provision_and_record(email, plan_code, reference, region)
+    _provision_and_record(email, plan_code, reference, region, referral_code)
 
 
 def handle_subscription_created(data: dict, meta: dict):
@@ -102,9 +109,10 @@ def handle_subscription_created(data: dict, meta: dict):
     custom_data = meta.get("custom_data") or {}
     plan_code   = custom_data.get("plan_code", "pro")
     region      = custom_data.get("region", "eu")
+    referral_code = custom_data.get("referral_code")
 
     log.info(f"subscription_created: {email} | plan={plan_code} | region={region}")
-    _provision_and_record(email, plan_code, reference, region)
+    _provision_and_record(email, plan_code, reference, region, referral_code)
 
 
 def handle_subscription_payment_success(data: dict, meta: dict):
@@ -218,8 +226,10 @@ def health():
 
 @app.route("/webhook/nowpayments", methods=["POST"])
 def nowpayments_webhook():
-    """Handle IPN callback from NOWPayments after a confirmed crypto payment."""
+    """NOWPayments IPN — verify signature, resolve email, provision account."""
+    import json, traceback
     from crypto_payments import verify_nowpayments_signature, handle_successful_payment, NGN_TO_USD_RATE
+    from database import get_pending_payment, delete_pending_payment
 
     payload   = request.get_data()
     signature = request.headers.get("x-nowpayments-sig", "")
@@ -232,24 +242,41 @@ def nowpayments_webhook():
         event          = json.loads(payload)
         payment_status = event.get("payment_status")
 
-        # Only act on terminal "finished" status
         if payment_status != "finished":
             log.info(f"NOWPayments status={payment_status} — not yet finished, skipping")
             return jsonify({"status": "ok"}), 200
 
-        # order_id format: "email::plan_code::amount_ngn::region"
-        order_id = event.get("order_id", "")
-        parts    = order_id.split("::")
-        if len(parts) < 2:
-            log.error(f"Unexpected order_id format: {order_id!r}")
-            return jsonify({"status": "error"}), 200
-
-        email      = parts[0]
-        plan_code  = parts[1]
-        amount_ngn = float(parts[2]) if len(parts) >= 3 else float(event.get("price_amount", 0)) * NGN_TO_USD_RATE
         reference  = f"np_{event.get('payment_id', '')}"
+        order_id   = event.get("order_id", "")
+        parts      = order_id.split("::")
 
-        handle_successful_payment(email, amount_ngn, reference, order_id=order_id)
+        # Primary path: dynamic invoice had email::plan_code::amount[::region] in order_id
+        referral_code = None
+        if len(parts) >= 2 and "@" in parts[0]:
+            email      = parts[0]
+            plan_code  = parts[1]
+            amount_ngn = float(parts[2]) if len(parts) >= 3 else float(event.get("price_amount", 0)) * NGN_TO_USD_RATE
+            region     = parts[3] if len(parts) >= 4 else "eu"
+        else:
+            # Fallback path: static invoice — look up the pending_payment we stored at initiation
+            # The IPN payload includes the invoice_id field for static invoices
+            iid = str(event.get("invoice_id", "") or event.get("order_id", ""))
+            pending = get_pending_payment(iid) if iid else None
+            if not pending:
+                log.error(f"NOWPayments IPN: no pending_payment found for iid={iid!r}, order_id={order_id!r}")
+                return jsonify({"status": "error", "reason": "unknown invoice"}), 200
+            email      = pending["email"]
+            plan_code  = pending["plan_code"]
+            region     = pending["region"]
+            amount_ngn = float(event.get("price_amount", 0)) * NGN_TO_USD_RATE
+            try:
+                referral_code = pending["referral_code"]
+            except KeyError:
+                pass
+            delete_pending_payment(iid)
+            log.info(f"Resolved static invoice iid={iid} → email={email} plan={plan_code}")
+
+        handle_successful_payment(email, amount_ngn, reference, order_id=order_id, referral_code=referral_code)
         return jsonify({"status": "ok"}), 200
 
     except Exception as e:

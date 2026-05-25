@@ -18,10 +18,11 @@ const Navbar = () => {
   }, []);
 
   const navLinks = [
-    { name: 'Features', href: '/#features' },
-    { name: 'Protocol', href: '/#how' },
-    { name: 'Pricing', href: '/pricing' },
-    { name: 'Guides', href: '/docs' },
+    { name: 'Features', href: '/#features', external: false, hash: true },
+    { name: 'Protocol', href: '/#how', external: false, hash: true },
+    { name: 'Pricing', href: '/pricing', external: false, hash: false },
+    { name: 'Guides', href: '/docs', external: false, hash: false },
+    { name: 'Affiliate', href: '/affiliate', external: false, hash: false },
   ];
 
   return (
@@ -35,15 +36,22 @@ const Navbar = () => {
           {/* Desktop Links */}
           <div className="nav-links">
             {navLinks.map((link) => (
-              <a key={link.name} href={link.href}>
-                {link.name}
-              </a>
+              link.hash ? (
+                <a key={link.name} href={link.href}>
+                  {link.name}
+                </a>
+              ) : (
+                <Link key={link.name} to={link.href}>
+                  {link.name}
+                </Link>
+              )
             ))}
           </div>
 
           <div className="nav-ctas">
             {user?.email ? (
               <>
+                <Link to="/affiliate" className="btn btn-ghost btn-nav" style={{ marginRight: '5px' }}>Affiliate</Link>
                 <Link to="/dashboard" className="btn btn-outline btn-nav">Dashboard</Link>
                 <button className="btn btn-ghost btn-nav" onClick={logout}>Sign out</button>
               </>
@@ -65,17 +73,28 @@ const Navbar = () => {
       {isMenuOpen && (
         <div className="mobile-menu">
           {navLinks.map((link) => (
-            <a
-              key={link.name}
-              href={link.href}
-              onClick={() => setIsMenuOpen(false)}
-            >
-              {link.name}
-            </a>
+            link.hash ? (
+              <a
+                key={link.name}
+                href={link.href}
+                onClick={() => setIsMenuOpen(false)}
+              >
+                {link.name}
+              </a>
+            ) : (
+              <Link
+                key={link.name}
+                to={link.href}
+                onClick={() => setIsMenuOpen(false)}
+              >
+                {link.name}
+              </Link>
+            )
           ))}
           {user?.email ? (
             <>
               <Link to="/dashboard" onClick={() => setIsMenuOpen(false)}>Dashboard</Link>
+              <Link to="/affiliate" onClick={() => setIsMenuOpen(false)}>Affiliate</Link>
               <button className="btn btn-ghost" onClick={() => { setIsMenuOpen(false); logout(); }}>Sign out</button>
             </>
           ) : (

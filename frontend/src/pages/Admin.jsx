@@ -8,8 +8,7 @@ const Admin = () => {
     const [apiUrl, setApiUrl] = useState(() => {
         const saved = sessionStorage.getItem('admin_api_url');
         if (saved) return saved;
-        const { hostname, protocol } = window.location;
-        return `${protocol}//${hostname}/admin-api`;
+        return `${window.location.origin}/admin-api`;
     });
     const [loginError, setLoginError] = useState('');
     const [status, setStatus] = useState(null);
@@ -20,6 +19,8 @@ const Admin = () => {
     const [addMsg, setAddMsg] = useState({ text: '', type: '' });
     const [toast, setToast] = useState({ show: false, text: '', type: 'ok' });
     const [subscribers, setSubscribers] = useState([]);
+    const [affiliates, setAffiliates] = useState([]);
+    const [expandedAffiliate, setExpandedAffiliate] = useState('');
     const [broadcast, setBroadcast] = useState(() => {
         try {
             const saved = JSON.parse(localStorage.getItem('admin_broadcast_draft') || '{"subject":"","body":"","audience":"all"}');
@@ -65,11 +66,12 @@ const Admin = () => {
     const refresh = async () => {
         if (!token) return;
         try {
-            const [statusRes, usersRes, serversRes, subsRes] = await Promise.all([
+            const [statusRes, usersRes, serversRes, subsRes, affRes] = await Promise.all([
                 apiFetch('/api/status'),
                 apiFetch('/api/users'),
                 apiFetch('/api/servers'),
                 apiFetch('/api/subscribers'),
+                apiFetch('/api/admin/affiliates').catch(() => ({ ok: false }))
             ]);
 
             if (!statusRes.ok || !usersRes.ok) {
@@ -102,6 +104,13 @@ const Admin = () => {
                 try {
                     const subsData = await subsRes.json();
                     setSubscribers(subsData.subscribers || []);
+                } catch (_) {}
+            }
+            
+            if (affRes.ok) {
+                try {
+                    const affData = await affRes.json();
+                    setAffiliates(affData.affiliates || []);
                 } catch (_) {}
             }
         } catch (error) {
@@ -472,6 +481,11 @@ const Admin = () => {
 
     const sys = status?.system || {};
     const capacityPct = status ? Math.round((status.total_users / status.max_users) * 100) : 0;
+    const affiliateTotals = affiliates.reduce((totals, aff) => {
+        totals.referrals += Number(aff.referral_count || 0);
+        totals.earned += Number(aff.total_earned || 0);
+        return totals;
+    }, { referrals: 0, earned: 0 });
 
     return (
         <div className="admin-container">
@@ -753,6 +767,112 @@ const Admin = () => {
                     </div>
                 </div>
 
+                {/* Affiliates List */}
+                <div className="subs-card">
+                    <div className="card-header">
+                        <h3>Affiliates</h3>
+                        <div className="badge">{affiliates.length} referrers</div>
+                    </div>
+                    <div className="affiliate-summary">
+                        <div>
+                            <span className="summary-label">Total referrals</span>
+                            <strong>{affiliateTotals.referrals}</strong>
+                        </div>
+                        <div>
+                            <span className="summary-label">20% commission</span>
+                            <strong>${affiliateTotals.earned.toFixed(2)}</strong>
+                        </div>
+                    </div>
+                    <div className="subs-table-wrap custom-scrollbar">
+                        {affiliates.length === 0 ? (
+                            <div className="empty">No affiliates registered yet</div>
+                        ) : (
+                            <table className="subs-table">
+                                <thead>
+                                    <tr>
+                                        <th></th>
+                                        <th>Name</th>
+                                        <th>Email</th>
+                                        <th>Code</th>
+                                        <th>Joined</th>
+                                        <th>Referrals</th>
+                                        <th>20% Earned</th>
+                                        <th>Wallets</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {affiliates.map((aff) => {
+                                        const isExpanded = expandedAffiliate === aff.email;
+                                        const referrals = aff.referrals || [];
+                                        return (
+                                            <React.Fragment key={aff.email}>
+                                                <tr>
+                                                    <td>
+                                                        <button
+                                                            className={`row-toggle ${isExpanded ? 'open' : ''}`}
+                                                            onClick={() => setExpandedAffiliate(isExpanded ? '' : aff.email)}
+                                                            title={isExpanded ? 'Hide referrals' : 'Show referrals'}
+                                                        >
+                                                            <ChevronRight size={14} />
+                                                        </button>
+                                                    </td>
+                                                    <td>{aff.name}</td>
+                                                    <td className="mono">{aff.email}</td>
+                                                    <td className="mono" style={{ color: 'var(--accent)', fontWeight: 800 }}>{aff.referral_code}</td>
+                                                    <td className="mono muted">{aff.created_at ? aff.created_at.slice(0, 10) : '—'}</td>
+                                                    <td style={{ fontWeight: 800 }}>{aff.referral_count}</td>
+                                                    <td style={{ color: 'var(--accent)', fontWeight: 800 }}>${Number(aff.total_earned || 0).toFixed(2)}</td>
+                                                    <td>
+                                                        <div className="wallet-tags" title={`BTC: ${aff.wallet_btc || 'none'} | ETH: ${aff.wallet_eth || 'none'} | SOL: ${aff.wallet_sol || 'none'} | SUI: ${aff.wallet_sui || 'none'}`}>
+                                                            {['btc', 'eth', 'sol', 'sui'].filter(c => aff[`wallet_${c}`]).map(c => (
+                                                                <span key={c} className="crypto-tag">{c.toUpperCase()}</span>
+                                                            ))}
+                                                            {!['btc', 'eth', 'sol', 'sui'].some(c => aff[`wallet_${c}`]) && <span className="muted">None set</span>}
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                                {isExpanded && (
+                                                    <tr className="referral-detail-row">
+                                                        <td colSpan={8}>
+                                                            <div className="affiliate-address-panel">
+                                                                <div className="address-panel-head">
+                                                                    <span>Payout addresses provided by affiliate</span>
+                                                                </div>
+                                                                <div className="address-grid">
+                                                                    {['btc', 'eth', 'sol', 'sui'].map((chain) => (
+                                                                        <div key={chain} className="address-readonly">
+                                                                            <span>{chain.toUpperCase()}</span>
+                                                                            <code>{aff[`wallet_${chain}`] || 'Not provided'}</code>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                            {referrals.length === 0 ? (
+                                                                <div className="referral-empty">No referred customers recorded for this code yet.</div>
+                                                            ) : (
+                                                                <div className="referral-detail-list">
+                                                                    {referrals.map((ref, index) => (
+                                                                        <div className="referral-detail" key={`${ref.referred_email}-${ref.created_at}-${index}`}>
+                                                                            <span className="mono">{ref.referred_email}</span>
+                                                                            <span>{ref.plan_name}</span>
+                                                                            <strong>${Number(ref.amount || 0).toFixed(2)}</strong>
+                                                                            <span className="muted">{ref.created_at ? ref.created_at.slice(0, 10) : '—'}</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </React.Fragment>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        )}
+                    </div>
+                </div>
+
                 <div className="main-grid">
                     {/* User Management */}
                     <div className="users-card">
@@ -1016,6 +1136,10 @@ const Admin = () => {
         .fleet-meta { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 9px; color: var(--text3); padding-top: 0.75rem; border-top: 1px solid var(--border); }
 
         .subs-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 16px; padding: 1.5rem; margin-bottom: 1.5rem; }
+        .affiliate-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: -0.5rem 0 1rem; }
+        .affiliate-summary > div { background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+        .summary-label { display: block; font-family: var(--mono); font-size: 9px; color: var(--text3); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 5px; }
+        .affiliate-summary strong { color: var(--accent); font-family: var(--mono); font-size: 15px; }
                 .broadcast-grid { display: flex; flex-direction: column; gap: 10px; }
                 .broadcast-row { display: flex; flex-direction: column; gap: 6px; }
                 .broadcast-row label { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--text3); }
@@ -1033,6 +1157,20 @@ const Admin = () => {
         .subs-table tr:hover td { background: var(--bg3); }
         .subs-table .mono { font-family: var(--mono); font-size: 12px; }
         .subs-table .muted { color: var(--text2); }
+        .row-toggle { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; background: var(--bg3); border: 1px solid var(--border); color: var(--text2); border-radius: 6px; cursor: pointer; transition: all .15s; }
+        .row-toggle.open { color: var(--accent); border-color: rgba(74,222,128,0.25); transform: rotate(90deg); }
+        .referral-detail-row td { background: rgba(20, 28, 46, 0.55); padding: 0 12px 12px; }
+        .affiliate-address-panel { padding: 12px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+        .address-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+        .address-panel-head span { font-family: var(--mono); font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: .08em; }
+        .address-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .address-readonly { display: flex; flex-direction: column; gap: 5px; min-width: 0; background: var(--bg3); border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; }
+        .address-readonly span { font-family: var(--mono); font-size: 9px; color: var(--text3); font-weight: 800; }
+        .address-readonly code { overflow-wrap: anywhere; color: var(--text2); font-family: var(--mono); font-size: 11px; }
+        .referral-detail-list { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+        .referral-detail { display: grid; grid-template-columns: minmax(180px, 1.4fr) minmax(90px, .7fr) minmax(80px, .5fr) minmax(90px, .5fr); gap: 12px; align-items: center; font-size: 12px; color: var(--text2); }
+        .referral-detail strong { color: var(--accent); font-family: var(--mono); }
+        .referral-empty { padding: 12px; border: 1px dashed var(--border); border-radius: 10px; color: var(--text3); font-family: var(--mono); font-size: 11px; background: var(--bg); }
         .sub-badge { font-family: var(--mono); font-size: 9px; font-weight: 800; letter-spacing: .05em; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; }
         .sub-badge.active { color: var(--accent); background: var(--adim); border: 1px solid rgba(74,222,128,0.2); }
         .sub-badge.expired { color: var(--red); background: rgba(244,63,94,0.08); border: 1px solid rgba(244,63,94,0.2); }

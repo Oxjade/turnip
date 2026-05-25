@@ -94,15 +94,21 @@ const Pricing = () => {
             const endpoint = type === 'crypto'
                 ? '/api/pay/crypto/initiate'
                 : (user?.email ? '/api/pay/initiate' : '/api/pay/public/initiate');
+            const refCode = localStorage.getItem('turnip_referral');
+            const payload = {
+                email,
+                amount_ngn: plan.amount_ngn,
+                plan_code: plan.name.toLowerCase(),
+                region
+            };
+            if (refCode) {
+                payload.referral_code = refCode;
+            }
+
             const res = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    email,
-                    amount_ngn: plan.amount_ngn,
-                    plan_code: plan.name.toLowerCase(),
-                    region
-                })
+                body: JSON.stringify(payload)
             });
             const data = await res.json();
             if (data.payment_url) {

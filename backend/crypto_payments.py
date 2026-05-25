@@ -91,7 +91,7 @@ def verify_nowpayments_signature(payload: bytes, sig_header: str) -> bool:
 
 # ── Payment fulfilment ────────────────────────────────────────────────────────
 
-def handle_successful_payment(email: str, amount_ngn: float, reference: str, order_id: str = ""):
+def handle_successful_payment(email: str, amount_ngn: float, reference: str, order_id: str = "", referral_code: str = None):
     """Provision a VPN account after a confirmed crypto payment."""
     log.info(f"Crypto payment confirmed: {email} | ₦{amount_ngn:.0f} | ref={reference}")
 
@@ -119,6 +119,11 @@ def handle_successful_payment(email: str, amount_ngn: float, reference: str, ord
         region=creds["region"],
         devices=creds["devices"],
     )
+
+    if referral_code:
+        from database import record_referral
+        record_referral(referral_code, email, plan["name"], amount_ngn)
+        log.info(f"Recorded referral {referral_code} for {email}")
 
     send_welcome_email(email, creds, plan)
     log.info(f"Account activated via crypto: {email} → {creds['username']}")

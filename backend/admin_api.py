@@ -946,6 +946,18 @@ def clear_all_system_data():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/admin/affiliates", methods=["GET"])
+def get_affiliates_list():
+    _require_auth()
+    from database import get_admin_affiliates
+    try:
+        affiliates = get_admin_affiliates()
+        return jsonify({"affiliates": affiliates})
+    except Exception as e:
+        log.exception("Failed to get affiliates list")
+        return jsonify({"error": str(e)}), 500
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

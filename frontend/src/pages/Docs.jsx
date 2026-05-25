@@ -97,6 +97,10 @@ const articles = [
                     <li>Double-click the file → <strong>Install Certificate</strong> → <strong>Local Machine</strong> → <strong>Trusted Root Certification Authorities</strong> → <strong>Finish</strong>.</li>
                     <li>Try connecting again — the certificate warning should be gone.</li>
                 </ol>
+                <h4>If Windows says "policy match error"</h4>
+                <p>Open PowerShell as Administrator and run this after creating the VPN connection:</p>
+                <pre><code>{`Set-VpnConnectionIPsecConfiguration -ConnectionName "Turnip VPN" -AuthenticationTransformConstants SHA256128 -CipherTransformConstants AES256 -EncryptionMethod AES256 -IntegrityCheckMethod SHA256 -DHGroup Group14 -PfsGroup None -Force`}</code></pre>
+                <p>Use the exact connection name you entered in Windows if it is not <code>Turnip VPN</code>.</p>
                 <h4>Verify all traffic routes through the VPN</h4>
                 <p>After connecting, open a browser and visit <a href="https://whatismyip.com" target="_blank" rel="noopener noreferrer">whatismyip.com</a>. Your IP should show the VPN server's location, not your real location.</p>
                 <p className="tip">💡 If Windows shows "The connection was terminated" immediately, the CA cert is likely not installed correctly. Repeat the certificate install as <strong>Local Machine</strong> (not Current User).</p>

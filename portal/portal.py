@@ -985,6 +985,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
         <div class="setup-step"><div class="step-n">02</div><div>Settings → Network → VPN → <strong style="color:var(--text)">Add a VPN connection</strong></div></div>
         <div class="setup-step"><div class="step-n">03</div><div>Provider: Windows (built-in) · Type: <strong style="color:var(--text)">IKEv2</strong> · Server: <span class="mono" style="color:var(--accent)">{{ server }}</span></div></div>
         <div class="setup-step"><div class="step-n">04</div><div>Sign-in: Username / Password → enter credentials above</div></div>
+        <div class="setup-step"><div class="step-n">05</div><div>If Windows shows a policy match error, open PowerShell as Administrator and run:<br><code style="display:block;margin-top:8px;white-space:normal;word-break:break-word;color:var(--text2)">Set-VpnConnectionIPsecConfiguration -ConnectionName "Turnip VPN" -AuthenticationTransformConstants SHA256128 -CipherTransformConstants AES256 -EncryptionMethod AES256 -IntegrityCheckMethod SHA256 -DHGroup Group14 -PfsGroup None -Force</code></div></div>
       </div>
 
       <div id="os-android" class="os-panel">

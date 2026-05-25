@@ -143,12 +143,17 @@ conn turnip
     rightdns=${DNS1},${DNS2}
 
     eap_identity=%identity
-    ike=aes256gcm16-sha384-prfsha384-ecp384,aes256-sha256-modp2048,aes256-sha1-modp2048!
-    esp=aes256gcm16,aes256-sha256,aes256-sha1!
+    # Windows' built-in IKEv2 client commonly needs an explicit policy match.
+    # AEAD proposals do not include a separate integrity algorithm in StrongSwan.
+    ike=aes256gcm16-prfsha384-ecp384,aes256-sha256-modp2048!
+    esp=aes256gcm16,aes256-sha256!
 
     dpdaction=clear
-    dpddelay=300s
+    dpddelay=30s
+    dpdtimeout=120s
     rekey=no
+    fragmentation=yes
+    forceencaps=yes
     leftfirewall=yes
     auto=add
 EOF

@@ -7,7 +7,7 @@ Assigns users to the best (lowest load) server automatically.
 Regions: Netherlands, United States, Canada, Singapore
 """
 
-import os, json, re, subprocess, secrets, string, logging, paramiko
+import os, json, re, subprocess, secrets, string, logging, paramiko, shlex
 from dataclasses import dataclass, asdict
 from typing import Optional
 from pathlib import Path
@@ -349,9 +349,12 @@ def reinstall_strongswan(host: str) -> tuple[bool, str]:
 
     Returns (success: bool, log_output: str).
     """
-    REINSTALL_SCRIPT = r"""
+    public_host = next((srv.public_host for srv in load_servers() if srv.host == host), host)
+    server_addr = shlex.quote(public_host)
+    REINSTALL_SCRIPT = rf"""
 set -e
 export DEBIAN_FRONTEND=noninteractive
+SERVER_ADDR={server_addr}
 
 echo "==> Stopping & purging StrongSwan..."
 systemctl stop strongswan-starter 2>/dev/null || true
@@ -367,7 +370,7 @@ config setup
     charondebug="ike 1, knl 1, cfg 0"
     uniqueids=never
 
-conn ikev2-vpn
+conn turnip
     auto=add
     compress=no
     type=tunnel
@@ -376,10 +379,11 @@ conn ikev2-vpn
     forceencaps=yes
     dpdaction=clear
     dpddelay=300s
+    dpdtimeout=120s
     rekey=no
     left=%any
-    leftid=@server
-    leftcert=server-cert.pem
+    leftid=SERVER_ADDR_PLACEHOLDER
+    leftcert=serverCert.pem
     leftsendcert=always
     leftsubnet=0.0.0.0/0
     right=%any
@@ -389,7 +393,10 @@ conn ikev2-vpn
     rightdns=8.8.8.8,8.8.4.4
     rightsendcert=never
     eap_identity=%identity
+    ike=aes256gcm16-prfsha384-ecp384,aes256-sha256-modp2048!
+    esp=aes256gcm16,aes256-sha256!
 IPSEC_CONF
+sed -i "s/SERVER_ADDR_PLACEHOLDER/${{SERVER_ADDR}}/g" /etc/ipsec.conf
 
 echo "==> Restarting StrongSwan..."
 systemctl enable strongswan-starter

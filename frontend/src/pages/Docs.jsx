@@ -93,7 +93,7 @@ const articles = [
                 </ol>
                 <h4>Install the CA certificate (required on most systems)</h4>
                 <ol>
-                    <li>Download <code>turnip-ca.pem</code> from your <a href="/dashboard">Dashboard</a>.</li>
+                    <li>Download <code>turnip-ca.cer</code> from <a href="/download/ca/windows">Windows CA Certificate</a>.</li>
                     <li>Double-click the file → <strong>Install Certificate</strong> → <strong>Local Machine</strong> → <strong>Trusted Root Certification Authorities</strong> → <strong>Finish</strong>.</li>
                     <li>Try connecting again — the certificate warning should be gone.</li>
                 </ol>

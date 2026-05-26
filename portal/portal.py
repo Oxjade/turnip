@@ -365,13 +365,23 @@ def download_sswan():
 @app.route("/download/ca")
 @login_required
 def download_ca():
+    return _download_ca("turnip-ca.pem", "application/x-pem-file")
+
+
+@app.route("/download/ca/windows")
+@login_required
+def download_ca_windows():
+    return _download_ca("turnip-ca.cer", "application/x-x509-ca-cert")
+
+
+def _download_ca(filename: str, content_type: str):
     try:
         sub = get_current_user()
         region = request.args.get("region") or (sub or {}).get("server_region")
         ca_bytes = get_ca_cert_bytes(region)
         response = make_response(ca_bytes)
-        response.headers["Content-Type"]        = "application/x-pem-file"
-        response.headers["Content-Disposition"] = 'attachment; filename="turnip-ca.pem"'
+        response.headers["Content-Type"]        = content_type
+        response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 404

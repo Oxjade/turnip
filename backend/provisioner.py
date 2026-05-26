@@ -585,20 +585,19 @@ def generate_sswan_config(
         "uuid": profile_uuid,
         "name": f"Turnip VPN - {username}",
         "type": "ikev2-eap",
+        "dns-servers": ["1.1.1.1", "8.8.8.8"],
         "remote": {
             "addr": server,
-            "id": server
+            "id": server,
+            "cert": ca_b64,
         },
         "local": {
-            "eap_id": username
+            "eap_id": username,
+            "shared_secret": password,
         },
-        "password": password,
-        "ca": {
-            "cert": ca_b64
-        },
-        "options": {
-            "encap": "auto",
-            "pfs": "yes"
+        "split-tunneling": {
+            "block-ipv4": True,
+            "block-ipv6": True,
         }
     }
 

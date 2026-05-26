@@ -164,26 +164,35 @@ def api_login():
     if not email or "@" not in email:
         return jsonify({"error": "Enter a valid email address"}), 400
 
-    sub = get_subscription(email=email)
-    if not sub:
-        # Also allow registered users without a sub (e.g. registered but not yet paid)
-        user = get_user(email=email)
-        if not user:
-            return jsonify({"error": "No account found with this email."}), 404
+    try:
+        sub = get_subscription(email=email)
+        if not sub:
+            # Also allow registered users without a sub (e.g. registered but not yet paid)
+            user = get_user(email=email)
+            if not user:
+                return jsonify({"error": "No account found with this email."}), 404
+    except Exception as exc:
+        log.error(f"OTP account lookup failed for {email}: {exc}", exc_info=True)
+        return jsonify({"error": "Could not start sign-in. Please try again."}), 500
 
     # Generate 6-digit OTP and persist in DB so all gunicorn workers share it
     import random
     code = f"{random.SystemRandom().randint(0, 999999):06d}"
-    store_otp(email, code, time.time() + _OTP_TTL)
-    log.info(f"OTP generated for {email}")
+    try:
+        store_otp(email, code, time.time() + _OTP_TTL)
+        log.info(f"OTP generated for {email}")
+    except Exception as exc:
+        log.error(f"OTP store failed for {email}: {exc}", exc_info=True)
+        return jsonify({"error": "Could not create login code. Please try again."}), 500
 
-    # Send in background so slow SMTP doesn't block the response
-    def _send():
-        try:
-            send_otp_email(email, code)
-        except Exception as exc:
-            log.error(f"OTP email failed for {email}: {exc}")
-    threading.Thread(target=_send, daemon=True).start()
+    try:
+        send_otp_email(email, code)
+        log.info(f"OTP sent to {email}")
+    except Exception as exc:
+        log.error(f"OTP email failed for {email}: {exc}", exc_info=True)
+        return jsonify({
+            "error": "Could not send login code. Please check email delivery settings and try again."
+        }), 503
 
     return jsonify({"step": "otp", "email": email})
 

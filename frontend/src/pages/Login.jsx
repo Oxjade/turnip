@@ -81,12 +81,19 @@ const Login = () => {
         setOtpError('');
         setOtpLoading(true);
         try {
-            await fetch('/api/auth/login', {
+            const res = await fetch('/api/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email: otpEmail }),
             });
-        } catch (_) {}
+            let data = {};
+            try { data = await res.json(); } catch (_) {}
+            if (!res.ok || data.step !== 'otp') {
+                setOtpError(data.error || 'Could not resend login code. Please try again.');
+            }
+        } catch {
+            setOtpError('Could not reach the server. Please try again.');
+        }
         setOtpLoading(false);
     };
 

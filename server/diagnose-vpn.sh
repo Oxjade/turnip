@@ -2,7 +2,7 @@
 # =============================================================================
 # Turnip VPN — Live Server Diagnostic + Auto-Fix
 # Run on an already-deployed VPN server if clients connect but have no internet.
-# Usage: sudo bash diagnose-vpn.sh
+# Usage: sudo bash diagnose-vpn.sh [vpn_username]
 # =============================================================================
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'
@@ -26,8 +26,11 @@ VPN_SUBNET="10.10.10.0/24"
 PRIMARY_IFACE=$(ip route show default | awk '/default/ {print $5}' | head -1)
 SECRETS_FILE="/etc/ipsec.secrets"
 IPSEC_CONF="/etc/ipsec.conf"
+SERVER_CERT="/etc/ipsec.d/certs/serverCert.pem"
+VPN_USER="${1:-}"
 info "Primary interface : ${PRIMARY_IFACE}"
 info "VPN subnet        : ${VPN_SUBNET}"
+[[ -n "$VPN_USER" ]] && info "Checking VPN user: ${VPN_USER}"
 echo ""
 
 FIXES_APPLIED=0
@@ -169,11 +172,45 @@ if [[ -f "$SECRETS_FILE" ]]; then
     else
         fail "No EAP users found in ${SECRETS_FILE}"
     fi
+
+    if [[ -n "$VPN_USER" ]]; then
+        if awk -v u="$VPN_USER" '$1 == u && $2 == ":" && $3 == "EAP" { found=1 } END { exit(found ? 0 : 1) }' "$SECRETS_FILE"; then
+            ok "User '${VPN_USER}' exists as an EAP secret"
+        else
+            fail "User '${VPN_USER}' is NOT in ${SECRETS_FILE} — Windows/strongSwan will reject the login"
+            warn "Add it with: sudo bash /opt/turnip/adduser.sh '${VPN_USER}'"
+        fi
+    fi
 fi
 
-# ── 8. Handshake/auth visibility checks ──────────────────────────────────────
+# ── 8. Windows IKEv2 auth prerequisites ──────────────────────────────────────
 echo ""
-echo -e "${BOLD}8. Handshake/Auth Visibility${NC}"
+echo -e "${BOLD}8. Windows IKEv2 Auth Prerequisites${NC}"
+if command -v ipsec >/dev/null 2>&1; then
+    if ipsec listplugins 2>/dev/null | grep -Eiq 'eap-mschapv2|mschapv2'; then
+        ok "EAP-MSCHAPv2 plugin is available"
+    else
+        fail "EAP-MSCHAPv2 plugin not listed — username/password auth can fail"
+        warn "Install plugins: apt-get install -y libcharon-extra-plugins libstrongswan-extra-plugins"
+    fi
+fi
+
+if [[ -f "$SERVER_CERT" ]]; then
+    ok "Found server certificate: ${SERVER_CERT}"
+    SUBJECT=$(openssl x509 -in "$SERVER_CERT" -noout -subject 2>/dev/null | sed 's/^subject=//')
+    SAN=$(openssl x509 -in "$SERVER_CERT" -noout -ext subjectAltName 2>/dev/null | tail -n +2 | tr -d ' ')
+    LEFTID=$(awk '/^[[:space:]]*leftid[[:space:]]*=/{print $3; exit}' "$IPSEC_CONF" 2>/dev/null)
+    info "Certificate subject: ${SUBJECT:-unknown}"
+    info "Certificate SAN    : ${SAN:-none}"
+    info "ipsec.conf leftid  : ${LEFTID:-not set}"
+    warn "Windows error 'IKE authentication credentials are unacceptable' commonly means the CA is not trusted as Local Machine root, or the client server address does not exactly match the cert SAN/leftid."
+else
+    fail "Missing ${SERVER_CERT} — clients cannot authenticate the VPN server"
+fi
+
+# ── 9. Handshake/auth visibility checks ──────────────────────────────────────
+echo ""
+echo -e "${BOLD}9. Handshake/Auth Visibility${NC}"
 if command -v ipsec >/dev/null 2>&1; then
     if ipsec statusall >/tmp/turnip-ipsec-statusall.txt 2>/tmp/turnip-ipsec-statusall.err; then
         ok "ipsec statusall ran successfully"
@@ -191,16 +228,16 @@ else
 fi
 
 if [[ -n "$SS_UNIT" ]]; then
-    AUTH_FAILS=$(journalctl -u "$SS_UNIT" --since "-30 min" --no-pager 2>/dev/null | grep -Eic 'AUTHENTICATION_FAILED|EAP|NO_PROPOSAL_CHOSEN|invalid ID')
+    AUTH_FAILS=$(journalctl -u "$SS_UNIT" --since "-30 min" --no-pager 2>/dev/null | grep -Eic 'AUTHENTICATION_FAILED|EAP|NO_PROPOSAL_CHOSEN|invalid ID|no matching peer config|no trusted certificate|constraint check failed')
     if [[ "$AUTH_FAILS" -gt 0 ]]; then
         warn "Detected ${AUTH_FAILS} auth/proposal warning(s) in ${SS_UNIT} logs in last 30m"
-        warn "Run: journalctl -u ${SS_UNIT} --since '-30 min' | grep -Ei 'AUTHENTICATION_FAILED|EAP|NO_PROPOSAL_CHOSEN|invalid ID'"
+        warn "Run: journalctl -u ${SS_UNIT} --since '-30 min' | grep -Ei 'AUTHENTICATION_FAILED|EAP|NO_PROPOSAL_CHOSEN|invalid ID|no matching peer config|no trusted certificate|constraint check failed'"
     else
         ok "No recent auth/proposal failures detected in ${SS_UNIT} logs"
     fi
 fi
 
-# ── 9. Reload UFW if fixes were applied ──────────────────────────────────────
+# ── 10. Reload UFW if fixes were applied ─────────────────────────────────────
 if [[ $FIXES_APPLIED -gt 0 ]]; then
     echo ""
     info "Reloading UFW to apply changes..."

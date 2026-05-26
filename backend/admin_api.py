@@ -40,7 +40,7 @@ from provisioner import (
     deprovision_user,
     generate_mobileconfig,
     generate_sswan_config,
-    get_server_host,
+    get_server_assignment,
 )
 from emailer import send_welcome_email, send_transactional_email
 
@@ -194,23 +194,26 @@ def _deprovision_existing_devices(email: str):
     """Remove all known VPN identities for an email before re-provisioning."""
     sub = get_subscription(email=email)
     if sub and sub.get("username"):
-        deprovision_user(sub["username"])
+        deprovision_user(sub["username"], sub.get("server_region"))
     for dev in get_devices_for_email(email):
         if dev.get("username"):
-            deprovision_user(dev["username"])
+            deprovision_user(dev["username"], dev.get("server_region"))
 
 
-def _collect_usernames_for_email(email: str) -> list[str]:
-    usernames = []
+def _collect_vpn_identities_for_email(email: str) -> list[dict]:
+    identities = []
     sub = get_subscription(email=email)
     if sub and sub.get("username"):
-        usernames.append(sub["username"])
+        identities.append({"username": sub["username"], "region": sub.get("server_region")})
     for dev in get_devices_for_email(email):
         u = dev.get("username")
         if u:
-            usernames.append(u)
-    # Keep insertion order, drop duplicates
-    return list(dict.fromkeys(usernames))
+            identities.append({"username": u, "region": dev.get("server_region")})
+
+    deduped = {}
+    for item in identities:
+        deduped.setdefault(item["username"], item)
+    return list(deduped.values())
 
 
 def _send_admin_copy_if_configured(creds: dict, plan: dict):
@@ -820,15 +823,16 @@ def terminate_subscriber_configs(email):
     _require_auth()
 
     try:
-        usernames = _collect_usernames_for_email(email)
-        if not usernames:
+        identities = _collect_vpn_identities_for_email(email)
+        if not identities:
             return jsonify({"error": "No configs found for this subscriber"}), 404
 
         removed = 0
         failures = []
-        for username in usernames:
+        for identity in identities:
+            username = identity["username"]
             try:
-                deprovision_user(username)
+                deprovision_user(username, identity.get("region"))
                 removed += 1
             except Exception as exc:
                 failures.append({"username": username, "error": str(exc)})
@@ -837,14 +841,14 @@ def terminate_subscriber_configs(email):
         deleted_rows = clear_devices_for_email(email)
 
         log.info(
-            f"Admin terminated configs for {email} | removed={removed}/{len(usernames)} "
+            f"Admin terminated configs for {email} | removed={removed}/{len(identities)} "
             f"| deleted_device_rows={deleted_rows}"
         )
         return jsonify({
             "ok": True,
             "email": email,
             "terminated": removed,
-            "attempted": len(usernames),
+            "attempted": len(identities),
             "deleted_device_rows": deleted_rows,
             "status": "disabled",
             "failures": failures,
@@ -877,9 +881,20 @@ def resend_subscriber_configs(email):
 
         enriched_devices = []
         for dev in devices:
-            server_host = get_server_host(dev.get("server_region", sub.get("server_region", "eu")))
-            profile_b64 = generate_mobileconfig(dev["username"], dev["password"], server_host)
-            sswan_b64   = generate_sswan_config(dev["username"], dev["password"], server_host)
+            assignment = get_server_assignment(dev.get("server_region", sub.get("server_region", "eu")))
+            server_host = assignment["host"]
+            profile_b64 = generate_mobileconfig(
+                dev["username"],
+                dev["password"],
+                server_host,
+                assignment.get("management_host"),
+            )
+            sswan_b64 = generate_sswan_config(
+                dev["username"],
+                dev["password"],
+                server_host,
+                assignment.get("management_host"),
+            )
             enriched_devices.append({
                 "device_number": dev["device_number"],
                 "username": dev["username"],

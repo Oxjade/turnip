@@ -100,6 +100,9 @@ SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=you@gmail.com
 SMTP_PASS=your-app-password
+# Or use Resend/SendGrid:
+# EMAIL_PROVIDER=resend
+# RESEND_API_KEY=re_...
 
 TELEGRAM_BOT_TOKEN=               # optional: alert bot
 TELEGRAM_CHAT_ID=                 # optional: your chat ID
@@ -163,6 +166,7 @@ ipsec statusall                         # full detail
 bash server/adduser.sh alice            # add user
 bash server/deluser.sh alice            # remove user
 bash server/listusers.sh                # list all users
+sudo bash server/diagnose-vpn.sh alice  # auth/routing/cert checks + NAT fixes
 
 # Services
 systemctl status strongswan-starter
@@ -182,6 +186,17 @@ fail2ban-client status sshd
 fail2ban-client banned                  # all bans
 fail2ban-client set ike-auth unbanip X  # unban an IP
 ```
+
+### Fast VPN triage
+
+If Windows says `IKE authentication credentials are unacceptable`, check the CA/certificate and EAP user on the VPN server:
+
+```bash
+sudo bash server/diagnose-vpn.sh <vpn_username>
+journalctl -u strongswan-starter --since "-30 min" | grep -Ei 'AUTHENTICATION_FAILED|EAP|NO_PROPOSAL_CHOSEN|invalid ID|no trusted certificate'
+```
+
+If the VPN connects but internet does not flow, run the same diagnostic script. It verifies and fixes IP forwarding, UFW forwarding, and NAT masquerade for `10.10.10.0/24`.
 
 ---
 

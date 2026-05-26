@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 SSH_KEY_PATH   = os.environ.get("SSH_KEY_PATH",  "/root/.ssh/turnip_deploy")
 MAX_PER_SERVER = int(os.environ.get("MAX_USERS",  "80"))
 SECRETS_FILE   = "/etc/ipsec.secrets"
+CA_CERT_PATH   = "/etc/ipsec.d/cacerts/caCert.pem"
 
 CONTINENT_LABELS = {
     "eu": {"name": "Europe",        "flag": "🌍"},
@@ -304,7 +305,7 @@ def add_user_to_server(host: str, username: str, password: str) -> bool:
     line = f'\n{username} : EAP "{password}"\n'
     ok = _ssh_append_file(host, SECRETS_FILE, line)
     if ok:
-        _ssh_run(host, "ipsec secrets")
+        _ssh_run(host, f"chmod 600 {shlex.quote(SECRETS_FILE)} && ipsec secrets")
         log.info(f"User {username} added to {host}")
     return ok
 
@@ -318,9 +319,43 @@ def remove_user_from_server(host: str, username: str) -> bool:
              if not l.strip().startswith(f"{username} :")]
     ok = _ssh_write_file(host, SECRETS_FILE, "".join(lines))
     if ok:
-        _ssh_run(host, "ipsec secrets")
+        _ssh_run(host, f"chmod 600 {shlex.quote(SECRETS_FILE)} && ipsec secrets")
         log.info(f"User {username} removed from {host}")
     return ok
+
+
+def update_user_password_on_server(host: str, username: str, password: str) -> bool:
+    """Replace one EAP user's password on a VPN server and reload secrets."""
+    content = _ssh_read_file(host, SECRETS_FILE)
+    if content is None:
+        return False
+
+    found = False
+    updated = []
+    for line in content.splitlines(keepends=True):
+        if line.strip().startswith(f"{username} :"):
+            updated.append(f'{username} : EAP "{password}"\n')
+            found = True
+        else:
+            updated.append(line)
+
+    if not found:
+        log.warning(f"User {username} not found on {host}")
+        return False
+
+    ok = _ssh_write_file(host, SECRETS_FILE, "".join(updated))
+    if ok:
+        _ssh_run(host, f"chmod 600 {shlex.quote(SECRETS_FILE)} && ipsec secrets")
+        log.info(f"Password updated for {username} on {host}")
+    return ok
+
+
+def read_ca_cert_from_server(host: str) -> Optional[bytes]:
+    """Return the VPN CA certificate bytes from a server."""
+    content = _ssh_read_file(host, CA_CERT_PATH)
+    if content is None:
+        return None
+    return content.encode("utf-8")
 
 
 def clear_all_users_from_server(host: str) -> bool:
@@ -333,7 +368,7 @@ def clear_all_users_from_server(host: str) -> bool:
              if " : EAP " not in l]
     ok = _ssh_write_file(host, SECRETS_FILE, "".join(lines))
     if ok:
-        _ssh_run(host, "ipsec secrets")
+        _ssh_run(host, f"chmod 600 {shlex.quote(SECRETS_FILE)} && ipsec secrets")
         log.info(f"All VPN users cleared from {host}")
     return ok
 
@@ -362,7 +397,7 @@ apt-get remove --purge -y strongswan strongswan-pki libcharon-extra-plugins \
     libcharon-extauth-plugins libstrongswan-extra-plugins 2>&1 || true
 apt-get autoremove -y 2>&1 || true
 apt-get install -y strongswan strongswan-pki libcharon-extra-plugins \
-    libcharon-extauth-plugins libstrongswan-extra-plugins 2>&1
+    libcharon-extauth-plugins libstrongswan-extra-plugins iptables ufw 2>&1
 
 echo "==> Writing /etc/ipsec.conf (uniqueids=never)..."
 cat > /etc/ipsec.conf << 'IPSEC_CONF'
@@ -397,6 +432,36 @@ conn turnip
     esp=aes256gcm16,aes256-sha256!
 IPSEC_CONF
 sed -i "s/SERVER_ADDR_PLACEHOLDER/${{SERVER_ADDR}}/g" /etc/ipsec.conf
+
+echo "==> Enabling VPN forwarding and NAT..."
+VPN_SUBNET=10.10.10.0/24
+PRIMARY_IFACE=$(ip route show default | awk '/default/ {{print $5}}' | head -1)
+cat > /etc/sysctl.d/99-vpn.conf << 'SYSCTL'
+net.ipv4.ip_forward = 1
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.rp_filter = 0
+net.ipv4.conf.all.rp_filter = 0
+SYSCTL
+sysctl -p /etc/sysctl.d/99-vpn.conf >/dev/null 2>&1 || true
+
+iptables -t nat -C POSTROUTING -s "$VPN_SUBNET" -o "$PRIMARY_IFACE" -j MASQUERADE 2>/dev/null || \
+    iptables -t nat -A POSTROUTING -s "$VPN_SUBNET" -o "$PRIMARY_IFACE" -j MASQUERADE
+iptables -C FORWARD -s "$VPN_SUBNET" -j ACCEPT 2>/dev/null || iptables -A FORWARD -s "$VPN_SUBNET" -j ACCEPT
+iptables -C FORWARD -d "$VPN_SUBNET" -j ACCEPT 2>/dev/null || iptables -A FORWARD -d "$VPN_SUBNET" -j ACCEPT
+iptables -C INPUT -p udp --dport 500 -j ACCEPT 2>/dev/null || iptables -A INPUT -p udp --dport 500 -j ACCEPT
+iptables -C INPUT -p udp --dport 4500 -j ACCEPT 2>/dev/null || iptables -A INPUT -p udp --dport 4500 -j ACCEPT
+
+if [[ -f /etc/default/ufw ]]; then
+    sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
+    sed -i 's/DEFAULT_FORWARD_POLICY="REJECT"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
+fi
+if [[ -f /etc/ufw/before.rules ]] && ! grep -q 'TURNIP-NAT' /etc/ufw/before.rules 2>/dev/null; then
+    sed -i "1s|^|# TURNIP-NAT\n*nat\n:POSTROUTING ACCEPT [0:0]\n-A POSTROUTING -s $VPN_SUBNET -o $PRIMARY_IFACE -j MASQUERADE\nCOMMIT\n\n|" /etc/ufw/before.rules
+fi
+ufw allow 500/udp >/dev/null 2>&1 || true
+ufw allow 4500/udp >/dev/null 2>&1 || true
+ufw reload >/dev/null 2>&1 || true
 
 echo "==> Restarting StrongSwan..."
 systemctl enable strongswan-starter

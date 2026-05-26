@@ -135,7 +135,7 @@ def handle_subscription_payment_success(data: dict, meta: dict):
     existing_devices = get_devices_for_email(email)
     for dev in existing_devices:
         try:
-            deprovision_user(dev["username"])
+            deprovision_user(dev["username"], dev.get("server_region"))
         except Exception as exc:
             log.warning(f"Could not deprovision {dev['username']} before renewal: {exc}")
 
@@ -152,7 +152,7 @@ def handle_subscription_cancelled(data: dict, meta: dict):
     if devices:
         for dev in devices:
             try:
-                deprovision_user(dev["username"])
+                deprovision_user(dev["username"], dev.get("server_region"))
             except Exception as exc:
                 log.warning(f"Could not deprovision {dev['username']}: {exc}")
     else:
@@ -160,7 +160,7 @@ def handle_subscription_cancelled(data: dict, meta: dict):
         sub = get_subscription(email=email)
         if sub and sub.get("username"):
             try:
-                deprovision_user(sub["username"])
+                deprovision_user(sub["username"], sub.get("server_region"))
             except Exception as exc:
                 log.warning(f"Could not deprovision {sub['username']}: {exc}")
 

@@ -97,6 +97,13 @@ const articles = [
                     <li>Double-click the file → <strong>Install Certificate</strong> → <strong>Local Machine</strong> → <strong>Trusted Root Certification Authorities</strong> → <strong>Finish</strong>.</li>
                     <li>Try connecting again — the certificate warning should be gone.</li>
                 </ol>
+                <h4>If Windows says "IKE authentication credentials are unacceptable"</h4>
+                <ul>
+                    <li>Install the CA certificate under <strong>Local Machine</strong>, not Current User.</li>
+                    <li>Use the exact server address shown in your Dashboard. It must match the VPN server certificate.</li>
+                    <li>Delete and re-enter the saved username/password if Windows cached an old password.</li>
+                    <li>Ask support to confirm your username exists on the selected VPN server.</li>
+                </ul>
                 <h4>If Windows says "policy match error"</h4>
                 <p>Open PowerShell as Administrator and run this after creating the VPN connection:</p>
                 <pre><code>{`Set-VpnConnectionIPsecConfiguration -ConnectionName "Turnip VPN" -AuthenticationTransformConstants SHA256128 -CipherTransformConstants AES256 -EncryptionMethod AES256 -IntegrityCheckMethod SHA256 -DHGroup Group14 -PfsGroup None -Force`}</code></pre>

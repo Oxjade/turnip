@@ -170,6 +170,21 @@ def store_otp(email: str, code: str, expires_at: float):
         )
 
 
+def get_pending_otp(email: str) -> dict | None:
+    """Return an unexpired OTP for email, or None if no usable code exists."""
+    import time
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT code, expires_at FROM otps WHERE email = ?", (email,)
+        ).fetchone()
+        if not row:
+            return None
+        if time.time() > row["expires_at"]:
+            conn.execute("DELETE FROM otps WHERE email = ?", (email,))
+            return None
+        return dict(row)
+
+
 def verify_and_consume_otp(email: str, code: str) -> tuple:
     """
     Check the stored OTP for email against code.

@@ -49,8 +49,8 @@ log = logging.getLogger(__name__)
 # Import shared modules from payment backend
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../backend"))
-from database import db_init, get_subscription, get_all_subscriptions, record_payment, get_devices_for_email, register_user, get_user, admin_update_subscription, store_otp, verify_and_consume_otp, ensure_user, store_pending_payment, get_pending_payment, delete_pending_payment
-from provisioner import provision_user, deprovision_user, generate_password, generate_mobileconfig, generate_sswan_config, get_plan_for_amount, get_server_host, PLANS, CA_CERT_PATH, SERVERS
+from database import db_init, get_subscription, get_all_subscriptions, record_payment, get_devices_for_email, register_user, get_user, admin_update_subscription, store_otp, get_pending_otp, verify_and_consume_otp, ensure_user, store_pending_payment, get_pending_payment, delete_pending_payment
+from provisioner import provision_user, deprovision_user, update_ipsec_user_password, generate_password, generate_mobileconfig, generate_sswan_config, get_plan_for_amount, get_server_assignment, get_ca_cert_bytes, PLANS, CA_CERT_PATH, SERVERS
 from emailer import send_registration_notification, send_user_welcome_email, send_otp_email, send_welcome_email
 
 app = Flask(__name__, 
@@ -175,12 +175,18 @@ def api_login():
         log.error(f"OTP account lookup failed for {email}: {exc}", exc_info=True)
         return jsonify({"error": "Could not start sign-in. Please try again."}), 500
 
-    # Generate 6-digit OTP and persist in DB so all gunicorn workers share it
+    # Reuse a live OTP so quick duplicate submits/resends do not invalidate the
+    # code that may already be in the user's inbox.
     import random
-    code = f"{random.SystemRandom().randint(0, 999999):06d}"
     try:
-        store_otp(email, code, time.time() + _OTP_TTL)
-        log.info(f"OTP generated for {email}")
+        pending = get_pending_otp(email)
+        if pending:
+            code = pending["code"]
+            log.info(f"Reusing pending OTP for {email}")
+        else:
+            code = f"{random.SystemRandom().randint(0, 999999):06d}"
+            store_otp(email, code, time.time() + _OTP_TTL)
+            log.info(f"OTP generated for {email}")
     except Exception as exc:
         log.error(f"OTP store failed for {email}: {exc}", exc_info=True)
         return jsonify({"error": "Could not create login code. Please try again."}), 500
@@ -300,13 +306,17 @@ def download_profile():
         dev = next((d for d in devices if d["device_number"] == device_num), devices[0])
         username    = dev["username"]
         password    = dev["password"]
-        server_host = get_server_host(dev["server_region"])
+        region      = dev["server_region"]
+        assignment  = get_server_assignment(region)
+        server_host = assignment["host"]
     else:
         username    = sub["username"]
         password    = sub["password"]
-        server_host = VPN_SERVER_ADDR
+        region      = sub.get("server_region")
+        assignment  = get_server_assignment(region)
+        server_host = assignment["host"]
 
-    profile_b64  = generate_mobileconfig(username, password, server_host)
+    profile_b64  = generate_mobileconfig(username, password, server_host, assignment.get("management_host"))
     profile_bytes = base64.b64decode(profile_b64)
     filename      = f"turnip-device{device_num}-{username}.mobileconfig"
 
@@ -331,13 +341,17 @@ def download_sswan():
         dev = next((d for d in devices if d["device_number"] == device_num), devices[0])
         username    = dev["username"]
         password    = dev["password"]
-        server_host = get_server_host(dev["server_region"])
+        region      = dev["server_region"]
+        assignment  = get_server_assignment(region)
+        server_host = assignment["host"]
     else:
         username    = sub["username"]
         password    = sub["password"]
-        server_host = VPN_SERVER_ADDR
+        region      = sub.get("server_region")
+        assignment  = get_server_assignment(region)
+        server_host = assignment["host"]
 
-    profile_b64  = generate_sswan_config(username, password, server_host)
+    profile_b64  = generate_sswan_config(username, password, server_host, assignment.get("management_host"))
     profile_bytes = base64.b64decode(profile_b64)
     filename      = f"turnip-device{device_num}-{username}.sswan"
 
@@ -352,14 +366,15 @@ def download_sswan():
 @login_required
 def download_ca():
     try:
-        with open(CA_CERT_PATH, "rb") as f:
-            ca_bytes = f.read()
+        sub = get_current_user()
+        region = request.args.get("region") or (sub or {}).get("server_region")
+        ca_bytes = get_ca_cert_bytes(region)
         response = make_response(ca_bytes)
         response.headers["Content-Type"]        = "application/x-pem-file"
         response.headers["Content-Disposition"] = 'attachment; filename="turnip-ca.pem"'
         return response
-    except FileNotFoundError:
-        return jsonify({"error": "CA cert not found"}), 404
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 404
 
 
 @app.route("/api/regenerate", methods=["POST"])
@@ -373,21 +388,7 @@ def regenerate_password():
     new_password = generate_password()
     username     = sub["username"]
 
-    # Update ipsec.secrets
-    import re
-    from pathlib import Path
-    SECRETS_FILE = os.environ.get("IPSEC_SECRETS_FILE", "/etc/ipsec.secrets")
-    lines = Path(SECRETS_FILE).read_text().splitlines(keepends=True)
-    updated = []
-    for line in lines:
-        if line.strip().startswith(f"{username} :"):
-            updated.append(f'{username} : EAP "{new_password}"\n')
-        else:
-            updated.append(line)
-    Path(SECRETS_FILE).write_text("".join(updated))
-
-    import subprocess
-    subprocess.run(["ipsec", "secrets"], timeout=5)
+    update_ipsec_user_password(username, new_password, sub.get("server_region"))
 
     # Update DB — keep subscriptions and subscription_devices in sync
     from database import get_conn
@@ -994,7 +995,8 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
         <div class="setup-step"><div class="step-n">02</div><div>Settings → Network → VPN → <strong style="color:var(--text)">Add a VPN connection</strong></div></div>
         <div class="setup-step"><div class="step-n">03</div><div>Provider: Windows (built-in) · Type: <strong style="color:var(--text)">IKEv2</strong> · Server: <span class="mono" style="color:var(--accent)">{{ server }}</span></div></div>
         <div class="setup-step"><div class="step-n">04</div><div>Sign-in: Username / Password → enter credentials above</div></div>
-        <div class="setup-step"><div class="step-n">05</div><div>If Windows shows a policy match error, open PowerShell as Administrator and run:<br><code style="display:block;margin-top:8px;white-space:normal;word-break:break-word;color:var(--text2)">Set-VpnConnectionIPsecConfiguration -ConnectionName "Turnip VPN" -AuthenticationTransformConstants SHA256128 -CipherTransformConstants AES256 -EncryptionMethod AES256 -IntegrityCheckMethod SHA256 -DHGroup Group14 -PfsGroup None -Force</code></div></div>
+        <div class="setup-step"><div class="step-n">05</div><div>If Windows says "IKE authentication credentials are unacceptable", install the CA under <strong style="color:var(--text)">Local Machine → Trusted Root Certification Authorities</strong> and use this exact server address.</div></div>
+        <div class="setup-step"><div class="step-n">06</div><div>If Windows shows a policy match error, open PowerShell as Administrator and run:<br><code style="display:block;margin-top:8px;white-space:normal;word-break:break-word;color:var(--text2)">Set-VpnConnectionIPsecConfiguration -ConnectionName "Turnip VPN" -AuthenticationTransformConstants SHA256128 -CipherTransformConstants AES256 -EncryptionMethod AES256 -IntegrityCheckMethod SHA256 -DHGroup Group14 -PfsGroup None -Force</code></div></div>
       </div>
 
       <div id="os-android" class="os-panel">

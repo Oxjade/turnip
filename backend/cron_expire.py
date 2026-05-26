@@ -40,13 +40,13 @@ def disable_expired():
         log.info(f"Disabling expired account: {sub['username']} ({sub['email']}) — expired {sub['expires_at']}")
 
         # Deprovision Device 1 (stored in subscriptions.username)
-        deprovision_user(sub["username"])
+        deprovision_user(sub["username"], sub.get("server_region"))
 
         # Deprovision additional devices for multi-slot plans (Pro/Business)
         for dev in get_devices_for_email(sub["email"]):
             if dev["username"] != sub["username"]:
                 log.info(f"  Deprovisioning device {dev['device_number']}: {dev['username']}")
-                deprovision_user(dev["username"])
+                deprovision_user(dev["username"], dev.get("server_region"))
 
         update_subscription_status(sub["email"], "expired", subscription_id=sub["id"])
         send_expiry_notice(sub["email"], sub["expires_at"])

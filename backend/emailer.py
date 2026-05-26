@@ -538,6 +538,8 @@ def _build_html(creds: dict, plan: dict) -> str:
         <li>Settings → Network &amp; Internet → VPN → Add a VPN</li>
         <li>Provider: Windows (built-in) · Type: IKEv2</li>
         <li>Server: <span style="color:#00c896;font-family:monospace">{server}</span> · Username + password above</li>
+        <li>Install the CA certificate from your Dashboard as Local Machine → Trusted Root Certification Authorities</li>
+        <li>If Windows says "IKE authentication credentials are unacceptable", confirm the server address exactly matches the Dashboard and re-enter the saved password</li>
         <li>If Windows reports a policy match error, run this in PowerShell as Administrator:<br><span style="color:#8aa0b5;font-family:monospace;font-size:12px">Set-VpnConnectionIPsecConfiguration -ConnectionName "Turnip VPN" -AuthenticationTransformConstants SHA256128 -CipherTransformConstants AES256 -EncryptionMethod AES256 -IntegrityCheckMethod SHA256 -DHGroup Group14 -PfsGroup None -Force</span></li>
       </ol>
     </div>
@@ -596,6 +598,8 @@ SETUP
 ─────
 iOS/macOS : Open an attached .mobileconfig file and tap Install (one per device)
 Windows   : Settings → VPN → Add → IKEv2 → enter server + credentials.
+            Install the CA cert from Dashboard as Local Machine → Trusted Root Certification Authorities.
+            If Windows says "IKE authentication credentials are unacceptable", confirm the server address matches Dashboard and re-enter the saved password.
             If Windows shows a policy match error, run PowerShell as Administrator:
             Set-VpnConnectionIPsecConfiguration -ConnectionName "Turnip VPN" -AuthenticationTransformConstants SHA256128 -CipherTransformConstants AES256 -EncryptionMethod AES256 -IntegrityCheckMethod SHA256 -DHGroup Group14 -PfsGroup None -Force
 Android   : Install strongSwan app → open .sswan attachment OR add profile manually with credentials above

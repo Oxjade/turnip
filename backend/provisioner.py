@@ -29,6 +29,7 @@ SERVERS_BY_REGION = {s["region"]: s for s in SERVERS if s.get("active")}
 # Continent codes that trigger auto-selection of best server in that region
 CONTINENT_CODES = {"eu", "na", "as"}
 LOCAL_HOSTS_FOR_CLIENTS = {"127.0.0.1", "localhost", "::1"}
+LOCAL_MANAGEMENT_HOSTS = {"", "127.0.0.1", "localhost", "::1"}
 
 # ── Plans ─────────────────────────────────────────────────────────────────────
 
@@ -63,15 +64,75 @@ def get_plan_for_amount(amount_ngn: float, plan_code: str = "") -> dict:
     return DEFAULT_PLAN
 
 
-def get_server_host(region: str) -> str:
-    """Resolve a specific server region code (nl/us/sg...) to a VPN server public host."""
+def _client_host(host: str, public_host: str = "") -> str:
+    """Return the address clients should connect to for a server record."""
+    candidate = public_host or host or SERVER_ADDR
+    if candidate in LOCAL_HOSTS_FOR_CLIENTS:
+        return SERVER_ADDR
+    return candidate
+
+
+def _uses_local_secrets(management_host: str | None) -> bool:
+    """Whether ipsec.secrets should be edited on this backend host."""
+    return (management_host or "") in LOCAL_MANAGEMENT_HOSTS
+
+
+def get_server_assignment(region: str) -> dict:
+    """
+    Resolve a requested region/continent into both client and management hosts.
+
+    `host` is what goes into the client profile. `management_host` is where the
+    EAP secret must be written. Those differ when a server uses public_host.
+    """
+    region = (region or "eu").lower()
+
+    if region in CONTINENT_CODES:
+        try:
+            from multiserver import get_best_server_for_continent
+            best = get_best_server_for_continent(region)
+            if best:
+                return {
+                    "host":            _client_host(best.host, best.public_host),
+                    "management_host": best.host,
+                    "region":          best.region,
+                }
+        except ImportError:
+            log.warning("multiserver module not available — using static server fallback")
+        except Exception as exc:
+            log.warning(f"get_best_server_for_continent failed: {exc} — using static fallback")
+
+        for s in SERVERS:
+            if s.get("active") and s.get("continent", "").lower() == region:
+                return {
+                    "host":            _client_host(s.get("host"), s.get("public_host", "")),
+                    "management_host": s.get("host"),
+                    "region":          s["region"],
+                }
+
+        for s in SERVERS:
+            if s.get("active"):
+                return {
+                    "host":            _client_host(s.get("host"), s.get("public_host", "")),
+                    "management_host": s.get("host"),
+                    "region":          s["region"],
+                }
+
+        return {"host": SERVER_ADDR, "management_host": None, "region": region}
+
     server = SERVERS_BY_REGION.get(region)
     if server:
-        host = server.get("public_host") or server["host"]
-        if host in LOCAL_HOSTS_FOR_CLIENTS:
-            return SERVER_ADDR
-        return host
-    return SERVER_ADDR  # fallback to env var
+        return {
+            "host":            _client_host(server.get("host"), server.get("public_host", "")),
+            "management_host": server.get("host"),
+            "region":          server["region"],
+        }
+
+    return {"host": SERVER_ADDR, "management_host": None, "region": region}
+
+
+def get_server_host(region: str) -> str:
+    """Resolve a specific server region code (nl/us/sg...) to a VPN server public host."""
+    return get_server_assignment(region)["host"]
 
 
 def get_server_for_continent(continent: str) -> dict:
@@ -84,10 +145,7 @@ def get_server_for_continent(continent: str) -> dict:
         from multiserver import get_best_server_for_continent
         best = get_best_server_for_continent(continent)
         if best:
-            host = best.public_host or best.host
-            if host in LOCAL_HOSTS_FOR_CLIENTS:
-                host = SERVER_ADDR
-            return {"host": host, "region": best.region}
+            return {"host": _client_host(best.host, best.public_host), "region": best.region}
     except ImportError:
         log.warning("multiserver module not available — using static server fallback")
     except Exception as exc:
@@ -95,17 +153,11 @@ def get_server_for_continent(continent: str) -> dict:
     # Fallback: first active server in the requested continent
     for s in SERVERS:
         if s.get("active") and s.get("continent", "").lower() == continent.lower():
-            host = s.get("public_host") or s["host"]
-            if host in LOCAL_HOSTS_FOR_CLIENTS:
-                host = SERVER_ADDR
-            return {"host": host, "region": s["region"]}
+            return {"host": _client_host(s.get("host"), s.get("public_host", "")), "region": s["region"]}
     # Last resort: any active server
     for s in SERVERS:
         if s.get("active"):
-            host = s.get("public_host") or s["host"]
-            if host in LOCAL_HOSTS_FOR_CLIENTS:
-                host = SERVER_ADDR
-            return {"host": host, "region": s["region"]}
+            return {"host": _client_host(s.get("host"), s.get("public_host", "")), "region": s["region"]}
     return {"host": SERVER_ADDR, "region": continent}
 
 
@@ -152,32 +204,30 @@ def provision_user(email: str, plan: dict, region: str = "eu") -> dict:
     Returns a dict with backward-compat top-level fields and a `devices` list.
     Raises RuntimeError if the server is at capacity.
     """
-    if is_server_full():
+    assignment = get_server_assignment(region)
+    server_host     = assignment["host"]
+    resolved_region = assignment["region"]
+    management_host = assignment.get("management_host")
+
+    if _uses_local_secrets(management_host) and is_server_full():
         raise RuntimeError(
             f"Server at capacity ({MAX_USERS} users). "
             "Cannot provision new account."
         )
-
-    # Resolve continent → best specific server
-    if region in CONTINENT_CODES:
-        srv = get_server_for_continent(region)
-        server_host     = srv["host"]
-        resolved_region = srv["region"]
-    else:
-        server_host     = get_server_host(region)
-        resolved_region = region
 
     n_devices = min(plan.get("devices", 1), 10)  # cap Business at 10
     expiry    = datetime.utcnow() + timedelta(days=plan["duration_days"])
     single_log = plan.get("single_log", False)
 
     devices = []
+    needs_local_reload = False
     if single_log:
         username = email_to_username(email)
         password = generate_password()
-        _add_ipsec_user(username, password)
-        profile_b64 = generate_mobileconfig(username, password, server_host)
-        sswan_b64   = generate_sswan_config(username, password, server_host)
+        if _add_ipsec_user_for_assignment(username, password, management_host) == "local":
+            needs_local_reload = True
+        profile_b64 = generate_mobileconfig(username, password, server_host, management_host)
+        sswan_b64   = generate_sswan_config(username, password, server_host, management_host)
         for i in range(n_devices):
             devices.append({
                 "device_number": i + 1,
@@ -191,9 +241,10 @@ def provision_user(email: str, plan: dict, region: str = "eu") -> dict:
         for i in range(n_devices):
             username = email_to_username(email)
             password = generate_password()
-            _add_ipsec_user(username, password)
-            profile_b64 = generate_mobileconfig(username, password, server_host)
-            sswan_b64   = generate_sswan_config(username, password, server_host)
+            if _add_ipsec_user_for_assignment(username, password, management_host) == "local":
+                needs_local_reload = True
+            profile_b64 = generate_mobileconfig(username, password, server_host, management_host)
+            sswan_b64   = generate_sswan_config(username, password, server_host, management_host)
             devices.append({
                 "device_number": i + 1,
                 "username":      username,
@@ -203,8 +254,9 @@ def provision_user(email: str, plan: dict, region: str = "eu") -> dict:
                 "sswan_b64":        sswan_b64,
             })
 
-    # Single secrets reload after all users are written
-    if not _reload_ipsec_secrets():
+    # Single local secrets reload after all users are written. Remote writes
+    # reload on the target server inside multiserver.add_user_to_server().
+    if needs_local_reload and not _reload_ipsec_secrets():
         raise RuntimeError(
             "VPN credentials were written but failed to reload StrongSwan secrets. "
             "Run: ipsec secrets (or swanctl --load-creds) and check service logs."
@@ -252,10 +304,44 @@ def provision_user_with_device_count(
     return provision_user(email=email, plan=plan, region=region)
 
 
-def deprovision_user(username: str):
-    """Remove a VPN user from ipsec.secrets and reload."""
+def _add_ipsec_user_for_assignment(username: str, password: str, management_host: str | None) -> str:
+    """Write an EAP secret to the selected VPN server. Returns local/remote."""
+    if _uses_local_secrets(management_host):
+        _add_ipsec_user(username, password)
+        return "local"
+
+    try:
+        from multiserver import add_user_to_server
+    except Exception as exc:
+        raise RuntimeError(
+            f"Cannot provision {username} on {management_host}: multiserver support is unavailable ({exc})."
+        )
+
+    if not add_user_to_server(management_host, username, password):
+        raise RuntimeError(
+            f"Could not write VPN credentials to {management_host}. "
+            "Check SSH_KEY_PATH, root SSH access, /etc/ipsec.secrets permissions, and StrongSwan logs."
+        )
+    return "remote"
+
+
+def deprovision_user(username: str, region: str | None = None):
+    """Remove a VPN user from the assigned server's ipsec.secrets and reload."""
     if not username:
         return
+    management_host = get_server_assignment(region).get("management_host") if region else None
+
+    if not _uses_local_secrets(management_host):
+        try:
+            from multiserver import remove_user_from_server
+        except Exception as exc:
+            raise RuntimeError(
+                f"Cannot remove {username} from {management_host}: multiserver support is unavailable ({exc})."
+            )
+        if not remove_user_from_server(management_host, username):
+            raise RuntimeError(f"Could not remove VPN user {username} from {management_host}")
+        return
+
     try:
         lines = Path(SECRETS_FILE).read_text().splitlines(keepends=True)
         filtered = [l for l in lines if not l.strip().startswith(f"{username} :")]
@@ -265,6 +351,39 @@ def deprovision_user(username: str):
         log.info(f"Deprovisioned: {username}")
     except Exception as e:
         log.error(f"Failed to deprovision {username}: {e}")
+
+
+def update_ipsec_user_password(username: str, password: str, region: str | None = None):
+    """Update an EAP user's password on the assigned VPN server."""
+    if not username:
+        raise RuntimeError("Missing VPN username")
+
+    management_host = get_server_assignment(region).get("management_host") if region else None
+    if not _uses_local_secrets(management_host):
+        try:
+            from multiserver import update_user_password_on_server
+        except Exception as exc:
+            raise RuntimeError(
+                f"Cannot update {username} on {management_host}: multiserver support is unavailable ({exc})."
+            )
+        if not update_user_password_on_server(management_host, username, password):
+            raise RuntimeError(f"Could not update VPN password for {username} on {management_host}")
+        return
+
+    lines = Path(SECRETS_FILE).read_text().splitlines(keepends=True)
+    updated = []
+    found = False
+    for line in lines:
+        if line.strip().startswith(f"{username} :"):
+            updated.append(f'{username} : EAP "{password}"\n')
+            found = True
+        else:
+            updated.append(line)
+    if not found:
+        raise RuntimeError(f"VPN user {username} was not found in {SECRETS_FILE}")
+    Path(SECRETS_FILE).write_text("".join(updated))
+    if not _reload_ipsec_secrets():
+        raise RuntimeError("VPN password was written but StrongSwan secrets failed to reload")
 
 
 def _add_ipsec_user(username: str, password: str):
@@ -293,21 +412,47 @@ def _reload_ipsec_secrets():
     return False
 
 
+def get_ca_cert_bytes(region: str | None = None) -> bytes:
+    """Read the CA certificate for the requested/assigned VPN server."""
+    management_host = get_server_assignment(region).get("management_host") if region else None
+    return _get_ca_cert_bytes_for_management_host(management_host)
+
+
+def _get_ca_cert_bytes_for_management_host(management_host: str | None = None) -> bytes:
+    if _uses_local_secrets(management_host):
+        try:
+            return Path(CA_CERT_PATH).read_bytes()
+        except FileNotFoundError:
+            raise RuntimeError(
+                f"CA certificate not found at {CA_CERT_PATH}. "
+                "Set CA_CERT_PATH in .env or copy caCert.pem to the expected location."
+            )
+
+    try:
+        from multiserver import read_ca_cert_from_server
+    except Exception as exc:
+        raise RuntimeError(
+            f"Cannot read CA certificate from {management_host}: multiserver support is unavailable ({exc})."
+        )
+    ca_bytes = read_ca_cert_from_server(management_host)
+    if not ca_bytes:
+        raise RuntimeError(f"CA certificate not found on {management_host} at /etc/ipsec.d/cacerts/caCert.pem")
+    return ca_bytes
+
+
 # ── .mobileconfig generator ───────────────────────────────────────────────────
 
-def generate_mobileconfig(username: str, password: str, server: str) -> str:
+def generate_mobileconfig(
+    username: str,
+    password: str,
+    server: str,
+    management_host: str | None = None,
+) -> str:
     """
     Generate an Apple .mobileconfig profile with embedded CA cert.
     Returns base64-encoded profile bytes for email attachment.
     """
-    # Load CA cert — fail loudly rather than generating a silently broken profile
-    try:
-        ca_b64 = base64.b64encode(Path(CA_CERT_PATH).read_bytes()).decode()
-    except FileNotFoundError:
-        raise RuntimeError(
-            f"CA certificate not found at {CA_CERT_PATH}. "
-            "Set CA_CERT_PATH in .env or copy caCert.pem to the expected location."
-        )
+    ca_b64 = base64.b64encode(_get_ca_cert_bytes_for_management_host(management_host)).decode()
 
     profile_uuid = str(uuid.uuid4()).upper()
     vpn_uuid     = str(uuid.uuid4()).upper()
@@ -421,16 +566,17 @@ def generate_mobileconfig(username: str, password: str, server: str) -> str:
     return base64.b64encode(profile_xml.encode("utf-8")).decode()
 
 
-def generate_sswan_config(username: str, password: str, server: str) -> str:
+def generate_sswan_config(
+    username: str,
+    password: str,
+    server: str,
+    management_host: str | None = None,
+) -> str:
     """
     Generate a strongSwan Android (.sswan) profile.
     Returns base64-encoded JSON bytes for email attachment.
     """
-    try:
-        ca_bytes = Path(CA_CERT_PATH).read_bytes()
-        ca_b64   = base64.b64encode(ca_bytes).decode()
-    except FileNotFoundError:
-        raise RuntimeError(f"CA certificate not found at {CA_CERT_PATH}")
+    ca_b64 = base64.b64encode(_get_ca_cert_bytes_for_management_host(management_host)).decode()
 
     profile_uuid = str(uuid.uuid4())
     
